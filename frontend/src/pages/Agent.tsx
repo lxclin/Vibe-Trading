@@ -216,6 +216,11 @@ export function Agent() {
   const prevSseStatusRef = useRef<string>("disconnected");
   const genRef = useRef(0);
   const pendingGoalSessionRef = useRef<string | null>(null);
+  // Zustand status updates are observed by React on the next render. Without
+  // a synchronous guard, two rapid submits can both see the old "idle" value
+  // and append the same user message before the first request marks the turn
+  // as streaming.
+  const promptSubmissionLockRef = useRef(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const lastEventRef = useRef(0);
   const sseTimeoutMsRef = useRef(90_000);
@@ -418,6 +423,7 @@ export function Agent() {
     const previous = previousStatusRef.current;
     previousStatusRef.current = status;
     if (previous === "streaming" && status !== "streaming") {
+      promptSubmissionLockRef.current = false;
       requestAnimationFrame(() => {
         const selection = window.getSelection();
         if (selection && !selection.isCollapsed) return;
@@ -1266,7 +1272,8 @@ export function Agent() {
     prompt: string,
     attachment: ComposerAttachment | null = null,
   ) => {
-    if (!prompt.trim() || status === "streaming") return;
+    if (!prompt.trim() || status === "streaming" || promptSubmissionLockRef.current) return;
+    promptSubmissionLockRef.current = true;
     clearStreamingView();
 
     if (goalComposerActive) {
@@ -1295,6 +1302,7 @@ export function Agent() {
         }
         void syncCompletedAttempt(sid, sent.attempt_id);
       } catch (error) {
+        promptSubmissionLockRef.current = false;
         if (act().activity) archiveActivity("failed");
         act().setStatus("idle");
         const message = error instanceof Error ? error.message : t('agent.failedToStartGoal');
@@ -1346,6 +1354,7 @@ export function Agent() {
       }
       void syncCompletedAttempt(sid, sent.attempt_id);
     } catch (error) {
+      promptSubmissionLockRef.current = false;
       archiveActivity("failed");
       act().setStatus("error");
       const message = isAuthRequiredError(error) ? AUTH_REQUIRED_MESSAGE : t('agent.failedToSend');

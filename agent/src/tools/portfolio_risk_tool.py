@@ -167,6 +167,15 @@ class PortfolioRiskXrayTool(BaseTool):
         series: dict[str, pd.Series] = {}
         for sym in symbols:
             records = raw.get(sym)
+            # ``fetch_market_data`` wraps rows in a ``data`` envelope when
+            # max_rows truncates a long series.  Treat that envelope exactly
+            # like the ordinary list-of-records response; iterating the map
+            # itself would otherwise yield keys (``rows``, ``data``) and make
+            # the x-ray report a misleading "no close prices" error.
+            if isinstance(records, Mapping):
+                records = records.get("data")
+            if not isinstance(records, list):
+                continue
             if not records:
                 continue
             times: list[Any] = []

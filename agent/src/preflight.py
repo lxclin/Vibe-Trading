@@ -60,6 +60,32 @@ def _check_llm_provider() -> CheckResult:
             critical=True,
         )
 
+    # The provider probe below only checks network reachability.  The actual
+    # agent also needs the provider adapter package, which is imported lazily
+    # during the first request.  Catch a missing adapter here so the UI does
+    # not advertise a healthy LLM and then fail with a zero-step runtime error.
+    provider_lower = provider.lower()
+    if provider_lower in {"openai-codex", "openai_codex"}:
+        required_package = None
+    elif provider_lower == "anthropic":
+        required_package = "langchain_anthropic"
+    elif (
+        provider_lower == "deepseek"
+        and os.getenv("VIBE_TRADING_DEEPSEEK_ADAPTER", "").strip().lower() == "native"
+    ):
+        required_package = "langchain_deepseek"
+    else:
+        required_package = "langchain_openai"
+    if required_package and find_spec(required_package) is None:
+        pip_name = required_package.replace("_", "-")
+        return CheckResult(
+            name=f"LLM ({provider})",
+            status="error",
+            message=f"missing provider package: {required_package}",
+            impact=f"install with: pip install {pip_name}",
+            critical=True,
+        )
+
     _sync_provider_env()
     diagnostics = provider_diagnostics()
     base_url = os.getenv("OPENAI_BASE_URL", "") or os.getenv("OPENAI_API_BASE", "")  # noqa: env-gate — diagnostic base URL fallback
@@ -252,6 +278,43 @@ def _check_ccxt() -> CheckResult:
     return CheckResult(name="ccxt", status="ready", message="installed", impact="")
 
 
+def _check_runtime_dependencies() -> CheckResult:
+    """Report packages whose import failures silently remove local tools.
+
+    Tool discovery intentionally skips modules that cannot be imported, which
+    keeps the server bootable but previously made a degraded install look
+    healthy.  These packages are grouped by the user-visible capabilities they
+    unlock so startup output names the missing feature and the install command.
+    """
+    groups = {
+        "MCP runtime": ("fastmcp", "mcp"),
+        "Options/backtest runtime": ("scipy", "defusedxml", "duckdb"),
+        "Agent/document runtime": ("prompt_toolkit", "sklearn", "pptx", "ddgs"),
+    }
+    missing: list[str] = []
+    unavailable_groups: list[str] = []
+    for label, modules in groups.items():
+        absent = [module for module in modules if find_spec(module) is None]
+        if absent:
+            unavailable_groups.append(label)
+            missing.extend(absent)
+    if not missing:
+        return CheckResult(
+            name="Runtime Tool Dependencies",
+            status="ready",
+            message="MCP, options, backtest, agent, and document tool modules available",
+            impact="",
+        )
+    packages = " ".join(f"{module}" for module in sorted(set(missing)))
+    capabilities = ", ".join(unavailable_groups)
+    return CheckResult(
+        name="Runtime Tool Dependencies",
+        status="error",
+        message=f"missing: {packages}",
+        impact=f"{capabilities} unavailable; install with: pip install {packages}",
+    )
+
+
 # -- Status icons and colors --------------------------------------------------
 
 _STATUS_DISPLAY = {
@@ -281,6 +344,7 @@ def run_preflight(console: Optional[Console] = None) -> List[CheckResult]:
         _check_tushare,
         _check_akshare,
         _check_ccxt,
+        _check_runtime_dependencies,
         _check_content_filter_threshold,
     ]
 

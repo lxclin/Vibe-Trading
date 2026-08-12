@@ -42,6 +42,21 @@ def test_completed_reply_persists_runtime_identity_and_elapsed_time(
             "model": "deepseek-v4-flash-202607",
             "model_source": "provider_response",
             "reasoning_effort": "high",
+            "grounding_identity": {
+                "status": "locked",
+                "authorized_symbols": ["600547.SH"],
+                "inherited_symbols": [],
+                "records": [
+                    {
+                        "status": "locked",
+                        "symbol": "600547.SH",
+                        "venue": "shanghai",
+                        "currency": "CNY",
+                        "instrument_type": "listed_security",
+                        "source": ["user_message"],
+                    }
+                ],
+            },
         }
 
     monkeypatch.setattr(service, "_run_with_agent", _fake_run)
@@ -54,6 +69,9 @@ def test_completed_reply_persists_runtime_identity_and_elapsed_time(
     assert reply.metadata["model"] == "deepseek-v4-flash-202607"
     assert reply.metadata["model_source"] == "provider_response"
     assert reply.metadata["reasoning_effort"] == "high"
+    assert reply.metadata["grounding_identity"]["authorized_symbols"] == [
+        "600547.SH"
+    ]
     assert isinstance(reply.metadata["elapsed_ms"], int)
     assert reply.metadata["elapsed_ms"] >= 0
 
@@ -61,3 +79,8 @@ def test_completed_reply_persists_runtime_identity_and_elapsed_time(
     assert terminal.event_type == "attempt.completed"
     assert terminal.data["model"] == "deepseek-v4-flash-202607"
     assert terminal.data["elapsed_ms"] == reply.metadata["elapsed_ms"]
+
+    history = service._convert_messages_to_history(
+        [reply, type("M", (), {"role": "user", "content": "同业横向对比"})()]
+    )
+    assert history[0]["grounding_identity"]["status"] == "locked"

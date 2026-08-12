@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from backtest.loaders import eastmoney_client, sec_edgar_client, yahoo_client
@@ -64,6 +65,13 @@ _PER_SOURCE_CAP = 25
 # Sentinel for "no U.S. candidate, SEC was not consulted" so the caller can omit
 # the ``sec_edgar`` source entry entirely.
 _NO_US = "__no_us__"
+
+_QUALIFIED_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:\d{3,6}\.(?:SH|SZ|BJ|SS|HK)|"
+    r"[A-Z][A-Z0-9&.-]{0,19}\.(?:US|NS|BO))(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+_BARE_LISTED_CODE_RE = re.compile(r"(?<![A-Za-z0-9_])\d{5,6}(?![A-Za-z0-9_])")
 
 
 class SymbolSearchTool(BaseTool):
@@ -127,11 +135,28 @@ class SymbolSearchTool(BaseTool):
         candidates: List[Dict[str, Any]] = []
         sources: Dict[str, str] = {}
 
-        em_hits, sources["eastmoney"] = _search_eastmoney(query)
+        search_query = _preferred_code_query(query)
+
+        em_hits, sources["eastmoney"] = _search_eastmoney(search_query)
         candidates.extend(em_hits)
 
-        yh_hits, sources["yahoo"] = _search_yahoo(query)
+        yh_hits, sources["yahoo"] = _search_yahoo(search_query)
         candidates.extend(yh_hits)
+
+        # A provider can occasionally index a name but not its code (or vice
+        # versa). If the exact-code attempt was clean yet empty, retry the
+        # original mixed query once. Transport failures are not retried here.
+        if (
+            search_query != query
+            and not candidates
+            and _QUALIFIED_CODE_RE.fullmatch(query) is None
+        ):
+            if sources["eastmoney"] == "ok":
+                em_hits, sources["eastmoney"] = _search_eastmoney(query)
+                candidates.extend(em_hits)
+            if sources["yahoo"] == "ok":
+                yh_hits, sources["yahoo"] = _search_yahoo(query)
+                candidates.extend(yh_hits)
 
         merged = _merge_candidates(candidates)
         merged, sources["sec_edgar"] = _enrich_us_cik(merged)
@@ -146,6 +171,7 @@ class SymbolSearchTool(BaseTool):
                 "source": "symbol_search",
                 "data": {
                     "query": query,
+                    "resolved_query": search_query,
                     "count": len(merged),
                     "candidates": merged,
                     "sources": sources,
@@ -153,6 +179,39 @@ class SymbolSearchTool(BaseTool):
             },
             ensure_ascii=False,
         )
+
+
+def _preferred_code_query(query: str) -> str:
+    """Extract one exact listed code from a model's mixed name/code query.
+
+    Models commonly call ``search_symbol`` with text such as
+    ``"513330 恒生互联网ETF"``. Public suggest endpoints often return nothing
+    for that combined phrase even though ``"513330"`` resolves immediately.
+    Only a unique, code-shaped token is preferred; ambiguous prose and years
+    remain untouched.
+    """
+    qualified = {_normalize_query_code(match.group(0)) for match in _QUALIFIED_CODE_RE.finditer(query)}
+    if len(qualified) == 1:
+        return next(iter(qualified))
+    bare = set(_BARE_LISTED_CODE_RE.findall(query))
+    if len(bare) == 1:
+        return next(iter(bare))
+    return query
+
+
+def _normalize_query_code(value: str) -> str:
+    """Convert a project-qualified symbol to a provider-friendly lookup key.
+
+    The resolver emits project symbols such as ``513330.SH`` and ``AAPL.US``,
+    while both suggest providers are substantially more reliable when searched
+    with the bare code.  Canonicalization still happens on their returned
+    candidate, so stripping the suffix here cannot silently change venue.
+    """
+    code = value.strip().upper()
+    base, separator, suffix = code.rpartition(".")
+    if separator and suffix in {"SH", "SS", "SZ", "BJ", "HK", "US", "NS", "BO"}:
+        return base
+    return code
 
 
 def _clamp_limit(value: Any) -> int:
@@ -327,6 +386,14 @@ def _from_yahoo_symbol(raw_symbol: str, quote: Dict[str, Any]) -> tuple[str, str
         ``(symbol, market)`` in the project convention.
     """
     upper = raw_symbol.upper()
+    if upper.endswith(".SS"):
+        # Yahoo uses ``.SS`` for Shanghai listings, while every A-share
+        # consumer in this project uses the canonical ``.SH`` suffix.  Do the
+        # provider-boundary conversion before the grounding ledger locks the
+        # identity; consumers can then continue to require exact symbols
+        # without treating venue aliases as interchangeable.
+        base = upper[: -len(".SS")]
+        return f"{base}.SH", "cn"
     if upper.endswith(".HK"):
         base = raw_symbol[: -len(".HK")].lstrip("0") or "0"
         return f"{base.zfill(5)}.HK", "hk"

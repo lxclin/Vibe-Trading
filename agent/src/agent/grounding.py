@@ -78,13 +78,87 @@ _CANONICAL_SYMBOL_RE = re.compile(
     r")(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
+_BARE_NUMERIC_CODE_RE = re.compile(r"(?<![A-Za-z0-9_])\d{3,6}(?![A-Za-z0-9_])")
+_BARE_LISTED_CODE_RE = re.compile(r"(?<![A-Za-z0-9_])\d{5,6}(?![A-Za-z0-9_])")
 _ACTIONABLE_MARKET_RE = re.compile(
     r"(?:\bbuy\b|\bsell\b|\bentry\b|\btarget price\b|\bcurrent price\b|"
     r"\blatest price\b|\bprice of\b|\btrade\b|"
     r"\bvaluation of\b|\bwhat (?:is|are) .{1,80} worth\b|"
     r"\bis .{1,80} (?:listed|publicly traded)\b|"
     r"买入|卖出|入场|目标价|现价|最新价|股价|交易价格|估值|值多少钱|"
+    r"值得买|能买吗|能否买|适合买|是否值得投资|"
     r".{1,40}(?:是否|有没有|已经|已)(?:在.{0,20})?上市)",
+    re.IGNORECASE,
+)
+# Only clearly elliptical follow-ups may inherit a previously locked identity.
+# A message that names a new subject (for example, "SpaceX 值得买吗") must go
+# through the resolver again; broad fuzzy coreference would make stale symbols
+# an authorization source.  These forms intentionally cover short UI follow-ups
+# such as the one-click research suggestions emitted by the agent itself.
+_REFERENTIAL_FOLLOWUP_RE = re.compile(
+    r"^\s*(?:请\s*)?(?:"
+    r"继续|接着|继续分析|接着分析|进一步分析|再看看|再分析一下|"
+    r"同业(?:横向)?对比|同行(?:横向)?对比|横向对比|"
+    r"值得买入吗|值得买吗|能买吗|现在能买吗|"
+    r"该股.{0,24}|这只(?:股票|基金)?.{0,24}|它.{0,24}|"
+    r"上述(?:标的|股票|基金)?.{0,24}|前面(?:的|提到的)?.{0,24}|"
+    r"(?:风险|估值|目标价|基本面|技术面)(?:呢|如何|怎么样)?"
+    r")\s*[?？。！!]*\s*$|"
+    r"^\s*(?:continue|go on|peer comparison|compare peers|what about it|"
+    r"is it worth buying)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+# Position-management questions often carry the fill price/quote currency but
+# omit the ticker because the user is continuing the immediately preceding
+# trade discussion (e.g. “我刚刚142买入了100usdt，后面该做什么”).  Treat only
+# this narrow, amount-bearing form as referential; a new company/token name
+# must still go through normal identity resolution.
+_TRADE_MANAGEMENT_FOLLOWUP_RE = re.compile(
+    r"^\s*我\s*(?:刚刚|刚才|已经)?\s*"
+    r"(?:[-+]?\d+(?:[.,]\d+)?\s*)?"
+    r"(?:买入|买了|卖出|卖了|建仓|加仓|减仓|持有)\s*"
+    r"(?:了\s*)?[-+]?\d+(?:[.,]\d+)?\s*"
+    r"(?:USDT|USDC|USD|BTC|ETH|人民币|元|美元|港币|股|份)?"
+    r"[^。！？\n]{0,24}(?:后面|之后|接下来|下一步|怎么办|该做什么|如何)"
+    r"[^。！？\n]*\s*[?？。！!]*\s*$",
+    re.IGNORECASE,
+)
+_CRYPTO_REQUEST_RE = re.compile(
+    r"(?:虚拟货币|加密货币|数字货币|代币|交易对|现货价格|项目用途|"
+    r"解锁计划|持仓集中度|token(?:s)?|crypto(?:currency)?|spot\s+price|"
+    r"trading\s+pair|token\s+utility|unlock\s+schedule)",
+    re.IGNORECASE,
+)
+_SCREENING_REQUEST_RE = re.compile(
+    r"(?:推荐|筛选|选股|股票池|候选|低价|高增长|高股息|top\s*\d+|screen|shortlist|find\s+(?:stocks?|funds?))",
+    re.IGNORECASE,
+)
+_IDENTITY_ABSTENTION_RE = re.compile(
+    r"(?:无法(?:安全)?确认|未能确认|不能确认|没有(?:找到|确认到)(?:唯一|可靠)?|"
+    r"不存在(?:唯一|单一)|无法验证|无法核验|未经.*核验|请(?:提供|确认|告诉)|"
+    r"需要.*(?:平台|交易所|代码|交易对)|存在多个候选|"
+    r"could not (?:verify|confirm|resolve)|unable to (?:verify|confirm|resolve)|"
+    r"no (?:unique|reliable|verified)|please (?:provide|confirm)|multiple candidates)",
+    re.IGNORECASE,
+)
+_UNVERIFIED_PRICE_CLAIM_RE = re.compile(
+    r"(?:聚合报价.{0,30}(?:冲突|不一致)|网页(?:搜索)?快照|非实时(?:盘口|报价)?|"
+    r"不可作为可靠行情|不能视为可靠行情|无法核验(?:交易所)?实时盘口|"
+    r"未经(?:交易所|盘口|实时)?.{0,12}核验|历史(?:数据|价格|快照)?|"
+    r"此前|参考锚点|参考价|快照|"
+    r"unverified|conflicting aggregate quotes?|not (?:a )?real-time quote)",
+    re.IGNORECASE,
+)
+_UNSAFE_MARKET_CONCLUSION_RE = re.compile(
+    r"(?:(?:建议|应当|应该|可以|适合|值得|推荐).{0,12}(?:买入|卖出|建仓|加仓)|"
+    r"(?:买入价|卖出价|入场价|目标价)\s*[:：]?\s*[-+]?\d|"
+    r"(?:recommend|should|worth).{0,20}\b(?:buy|sell|enter)\b|"
+    r"\b(?:entry|target)\s+price\s*[:：]?\s*[-+]?\d)",
+    re.IGNORECASE,
+)
+_META_DELIVERY_RE = re.compile(
+    r"(?:报告|结果|结论).{0,16}(?:已|已经)(?:交付|完成|给出)|"
+    r"上方(?:完整(?:版|报告)|报告正文)|不再重复(?:内容)?",
     re.IGNORECASE,
 )
 _PRIVATE_ASSERTION_RE = re.compile(
@@ -108,11 +182,30 @@ _NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
     r"(?![A-Za-z0-9_])"
 )
+# Markdown list markers are labels, not market values.  Keep the required
+# whitespace after the marker so a real decimal at the start of a line (for
+# example "3.14 USD") is not mistaken for an ordered-list prefix.
+_ORDERED_LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*+]\s*)?\d{1,3}\s*[.)、]\s+")
 _DATE_RE = re.compile(r"\b(?:19|20)\d{2}[-/]\d{1,2}[-/]\d{1,2}\b")
 # Localized calendar text carries digits that the ISO pattern above leaves
 # behind: "8 月 3 日" otherwise contributes 8 and 3 as candidate prices.
 _LOCALIZED_DATE_RE = re.compile(
     r"(?:(?:19|20)\d{2}\s*年\s*)?\d{1,2}\s*月(?:\s*\d{1,2}\s*[日号])?|(?:19|20)\d{2}\s*年"
+)
+# Compact month-day text commonly appears in Chinese market prose without a
+# year ("8-4收盘价").  It is a date only when an adjacent date/quote marker makes
+# that meaning explicit; an unlabelled range such as "8-10元" stays numeric.
+_COMPACT_MARKET_DATE_RE = re.compile(
+    r"(?:(?:截至|日期|交易日|于)\s*)?(?<!\d)\d{1,2}[-/]\d{1,2}(?!\d)"
+    r"(?=\s*(?:日|号|收盘|开盘|交易))"
+)
+# Month/day dates are also commonly written without a year in English or
+# mixed-language market notes (for example, "美股 8/6 今晚开盘").  Treat valid
+# month/day pairs as calendar text before numeric price extraction; otherwise
+# the validator mistakes the month and day for unsupported prices.
+_COMPACT_SLASH_DATE_RE = re.compile(
+    r"(?<![\dA-Za-z])(?:0?[1-9]|1[0-2])\s*/\s*"
+    r"(?:0?[1-9]|[12]\d|3[01])(?![\dA-Za-z])"
 )
 # An aggregate amount is not a quoted price. "100 股成本 820 CNY" states a
 # position cost; comparing 820 against a per-share OHLC range is a category
@@ -127,8 +220,8 @@ _AGGREGATE_AMOUNT_RE = re.compile(
 # "3 个月". None of them are prices.
 _QUANTITY_WITH_UNIT_RE = re.compile(
     r"\d[\d,]*(?:\.\d+)?(?:\s*[-–—~至]\s*\d[\d,]*(?:\.\d+)?)?\s*"
-    r"(?:股|手|张|份|口|笔|倍|个月|周|天|日|年|次|"
-    r"shares?|contracts?|lots?|units?|weeks?|months?|days?|years?)",
+    r"(?:万亿元|亿元|万元|股|手|张|份|口|笔|倍|个月|周|天|日|年|次|"
+    r"项|个|条|步|件|类|指标|shares?|contracts?|lots?|units?|weeks?|months?|days?|years?)",
     re.IGNORECASE,
 )
 # Full-width brackets and enumeration commas delimit prose clauses. ASCII
@@ -264,6 +357,18 @@ def _infer_instrument_type(symbol: str, candidate_type: Any = None) -> str:
     if "forex" in raw or raw == "currency":
         return "forex"
     upper = _normalize_symbol(symbol)
+    # Some global quote providers label exchange-traded funds as EQUITY.  The
+    # Chinese exchanges reserve these code bands for listed funds, so this is a
+    # deterministic venue rule rather than an LLM guess.
+    base, _, suffix = upper.partition(".")
+    if (
+        suffix == "SH"
+        and base.startswith(("51", "56", "58"))
+    ) or (
+        suffix == "SZ"
+        and base.startswith(("15", "16"))
+    ):
+        return "fund"
     if upper.endswith("=F"):
         return "future"
     if upper.endswith(".FX"):
@@ -368,15 +473,16 @@ class GroundingLedger:
         user_message: str,
         history: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
-        """Create a ledger and seed only authoritative prior identities.
+        """Create a ledger and seed authoritative current or follow-up identities.
 
         Args:
             run_dir: Active run directory.
             user_message: Current user request.
-            history: Optional prior message history. It remains available to
-                the model, but is deliberately not an authorization source for
-                this run: stale identities from an earlier user subject must
-                not unlock a new subject's tools.
+            history: Optional prior message history. A clearly elliptical
+                follow-up may inherit the most recent structured locked
+                identity. Legacy sessions fall back to the nearest explicit
+                canonical symbol in a contiguous chain of referential user
+                messages; a newly named subject never inherits stale state.
         """
         self.run_dir = Path(run_dir)
         self.user_message = user_message
@@ -384,10 +490,42 @@ class GroundingLedger:
         self._evidence: list[EvidenceRecord] = []
         self._tool_failures: list[dict[str, Any]] = []
         self._validations: list[dict[str, Any]] = []
+        self._inherited_symbols: set[str] = set()
+        # Resolver calls for peer/benchmark instruments remain auditable, but
+        # an ambiguous auxiliary lookup must not poison the user's primary
+        # instrument identity.
+        self._primary_queries: set[str] = set()
+        self._primary_symbols: set[str] = set()
+        self._screening_request = bool(_SCREENING_REQUEST_RE.search(user_message))
+        self._prefer_chinese = bool(re.search(r"[\u3400-\u9fff]", user_message)) or any(
+            bool(re.search(r"[\u3400-\u9fff]", str(message.get("content") or "")))
+            for message in (history or [])
+            if isinstance(message, Mapping)
+        )
         self._identity_required = bool(_ACTIONABLE_MARKET_RE.search(user_message))
         self._buffer_output = self._identity_required
 
         self._seed_symbols(user_message, source="user_message")
+        self._primary_symbols.update(self.authorized_symbols)
+        if (
+            self._identity_required
+            and not self._screening_request
+            and not self._primary_symbols
+        ):
+            # A bare 5/6-digit exchange code is not enough to lock a venue, but
+            # it is enough to identify what must be resolved first.  Without
+            # this hint, a model that looks up a benchmark or constituent before
+            # the requested ETF can accidentally promote that peer to primary.
+            bare_codes = {_query_key(code) for code in _BARE_LISTED_CODE_RE.findall(user_message)}
+            self._primary_queries.update(key for key in bare_codes if key)
+        if (
+            not self._identities
+            and (
+                _REFERENTIAL_FOLLOWUP_RE.fullmatch(user_message or "")
+                or _TRADE_MANAGEMENT_FOLLOWUP_RE.fullmatch(user_message or "")
+            )
+        ):
+            self._seed_followup_history(history or [])
         self.persist()
 
     @property
@@ -400,9 +538,60 @@ class GroundingLedger:
         }
 
     @property
+    def inherited_symbols(self) -> set[str]:
+        """Return identities safely inherited for this referential follow-up."""
+        return set(self._inherited_symbols)
+
+    @property
+    def primary_symbols(self) -> set[str]:
+        """Return the user-requested instrument(s), excluding peer lookups."""
+        return set(self._primary_symbols)
+
+    def _is_primary_record(self, record: IdentityRecord) -> bool:
+        """Whether an identity record belongs to the user's requested subject."""
+        if self._screening_request:
+            return True
+        if record.status in {"ambiguous", "conflicting"} and self._primary_symbols:
+            candidate_symbols = {
+                _normalize_symbol(candidate.get("symbol"))
+                for candidate in record.candidates
+                if isinstance(candidate, Mapping)
+            }
+            if candidate_symbols & self._primary_symbols:
+                return True
+        if record.source_tool_call_id in {"user_message", "session_history"}:
+            return bool(record.symbol and record.symbol in self._primary_symbols)
+        if self._query_matches_primary_hint(record.query):
+            return True
+        return bool(record.symbol and record.symbol in self._primary_symbols)
+
+    def _query_matches_primary_hint(self, query: str) -> bool:
+        """Return whether a resolver query explicitly contains a primary hint."""
+        key = _query_key(query)
+        if key in self._primary_queries:
+            return True
+        tokens = {_query_key(code) for code in _BARE_LISTED_CODE_RE.findall(query)}
+        return bool(tokens & self._primary_queries)
+
+    def _has_locked_primary(self) -> bool:
+        """Return whether at least one requested subject has a verified lock."""
+        return any(
+            record.status == "locked" and self._is_primary_record(record)
+            for record in self._identities.values()
+        )
+
+    @property
     def identity_status(self) -> str:
         """Return the aggregate first-class identity state."""
-        records = list(self._identities.values())
+        records = [
+            record
+            for record in self._identities.values()
+            if not self._is_shadowed_resolution(record)
+            and (
+                self._is_primary_record(record)
+                or (not self._primary_queries and not self._primary_symbols)
+            )
+        ]
         if not records:
             return "unresolved" if self._identity_required else "not_required"
         statuses = {record.status for record in records}
@@ -414,6 +603,132 @@ class GroundingLedger:
         if statuses == {"not_found"}:
             return "not_found"
         return "unresolved"
+
+    def _is_shadowed_resolution(self, record: IdentityRecord) -> bool:
+        """Ignore resolver failures that cannot override an explicit identity.
+
+        The resolver is currently backed primarily by listed-security sources
+        such as Yahoo.  A user may already have supplied an exact crypto pair
+        (or another canonical symbol), in which case a later resolver outage
+        must not invalidate that explicit identity.  The resolver result is
+        still persisted for audit, but it is non-blocking until it resolves a
+        genuinely different instrument.
+        """
+        if record.source_tool_call_id in {"user_message", "session_history"}:
+            return False
+        if record.status not in {"unresolved", "invalidated", "conflicting", "ambiguous"}:
+            return False
+        explicit = [
+            item
+            for item in self._identities.values()
+            if item.source_tool_call_id in {"user_message", "session_history"}
+            and item.status == "locked"
+            and item.symbol
+        ]
+        if not explicit:
+            return False
+        # Transport failures and in-flight resolver records contain no
+        # competing instrument.  Once the user has supplied an exact identity,
+        # they must not poison that identity merely because a secondary lookup
+        # (often a model-generated alias) failed.
+        if record.status in {"unresolved", "invalidated"}:
+            return True
+        query_compact = re.sub(r"[^a-z0-9]", "", record.query.casefold())
+        for item in explicit:
+            symbol_compact = re.sub(r"[^a-z0-9]", "", item.symbol.casefold())
+            if query_compact and query_compact == symbol_compact:
+                return True
+            symbol_core = re.split(r"[./-]", item.symbol.casefold(), maxsplit=1)[0]
+            symbol_core = re.sub(r"[^a-z0-9]", "", symbol_core)
+            # A resolver may ask for the bare ticker (SKHY/AAPL) after the
+            # user supplied a canonical pair/suffix.  The explicit symbol is
+            # authoritative; a failed lookup must not replace it.
+            if query_compact and query_compact == symbol_core:
+                return True
+            # A resolver may shorten an explicitly supplied crypto base by a
+            # venue suffix (SKHY -> SKHYB/USDT).  Only allow a reasonably long
+            # prefix; accepting arbitrary substrings such as "HY" would let a
+            # failed lookup for an unrelated token inherit the wrong identity.
+            if (
+                item.instrument_type == "crypto"
+                and len(query_compact) >= 4
+                and symbol_core.startswith(query_compact)
+            ):
+                return True
+        return False
+
+    @property
+    def should_request_user_confirmation(self) -> bool:
+        """Whether the run should stop and ask the user to choose a candidate."""
+        if not self._identity_required or self.identity_status == "locked":
+            return False
+        records = [
+            record
+            for record in self._identities.values()
+            if record.status in {"ambiguous", "conflicting", "invalidated", "unresolved"}
+            and not self._is_shadowed_resolution(record)
+            and (
+                self._is_primary_record(record)
+                or (not self._primary_queries and not self._primary_symbols)
+            )
+        ]
+        if not records:
+            return False
+        if _CRYPTO_REQUEST_RE.search(self.user_message):
+            return True
+        if _SCREENING_REQUEST_RE.search(self.user_message):
+            return False
+        return any(
+            record.status in {"ambiguous", "conflicting", "invalidated", "unresolved"}
+            for record in records
+        )
+
+    def clarification_prompt(self) -> str:
+        """Return a concise candidate-selection question for the user."""
+        is_zh = self._prefer_chinese
+        candidates: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for record in self._identities.values():
+            if record.status not in {"ambiguous", "conflicting"}:
+                continue
+            if (self._primary_queries or self._primary_symbols) and not self._is_primary_record(record):
+                continue
+            for candidate in record.candidates:
+                symbol = _normalize_symbol(candidate.get("symbol"))
+                if symbol and symbol not in seen:
+                    seen.add(symbol)
+                    candidates.append(candidate)
+        labels: list[str] = []
+        for candidate in candidates[:8]:
+            symbol = _normalize_symbol(candidate.get("symbol"))
+            name = str(candidate.get("name") or "").strip()
+            venue = str(candidate.get("exchange") or candidate.get("market") or "").strip()
+            kind = str(candidate.get("type") or "").strip()
+            details = " / ".join(item for item in (name, venue, kind) if item)
+            labels.append(f"{symbol}（{details}）" if details else symbol)
+        if is_zh:
+            if labels:
+                return (
+                    "我找到多个可能的标的，但还不能确认你要交易哪一个："
+                    f"{'；'.join(labels)}。\n\n"
+                    "请告诉我具体平台、交易所或完整交易对。确认前我可以比较这些候选，"
+                    "但不会把不同产品的价格混在一起，也不会直接给买入结论。"
+                )
+            return (
+                "我还不能确认唯一的交易标的。请告诉我你看到它的平台、交易所、完整交易对"
+                "或合约地址；确认前我不会把同名股票、代币和聚合行情混在一起。"
+            )
+        if labels:
+            return (
+                "I found multiple possible instruments but cannot tell which one you intend: "
+                f"{'; '.join(labels)}.\n\n"
+                "Please provide the venue, exchange, or full trading pair. I can compare the "
+                "candidates first, but will not mix their prices or give a buy conclusion."
+            )
+        return (
+            "I cannot confirm one unique instrument yet. Please provide the venue, exchange, "
+            "full trading pair, or contract address before I use market prices."
+        )
 
     @property
     def should_buffer_output(self) -> bool:
@@ -430,6 +745,8 @@ class GroundingLedger:
         return {
             "status": self.identity_status,
             "authorized_symbols": sorted(self.authorized_symbols),
+            "primary_symbols": sorted(self._primary_symbols),
+            "inherited_symbols": sorted(self._inherited_symbols),
             "records": [asdict(record) for record in self._identities.values()],
         }
 
@@ -461,7 +778,23 @@ class GroundingLedger:
         if tool_name == _RESOLVER_TOOL:
             self._identity_required = True
             self._buffer_output = True
-            self._begin_resolution(str(arguments.get("query") or ""), call_id)
+            query = str(arguments.get("query") or "")
+            if (
+                self._primary_queries
+                and not self._has_locked_primary()
+                and not self._query_matches_primary_hint(query)
+            ):
+                requested = ", ".join(sorted(self._primary_queries))
+                return ToolAuthorization(
+                    allowed=False,
+                    error_code="primary_identity_required",
+                    message=(
+                        f"Resolve the user's requested instrument ({requested}) before "
+                        "looking up benchmarks, constituents, or peers. Call search_symbol "
+                        "with that exact code first."
+                    ),
+                )
+            self._begin_resolution(query, call_id)
             return ToolAuthorization(allowed=True)
 
         if self._is_private_company_skill(tool_name, arguments):
@@ -480,6 +813,21 @@ class GroundingLedger:
                     ),
                 )
             return ToolAuthorization(allowed=True)
+
+        if (
+            tool_name == "screen_market"
+            and self._identity_required
+            and not self._screening_request
+            and (batch_identity_status or self.identity_status) != "locked"
+        ):
+            return ToolAuthorization(
+                allowed=False,
+                error_code="identity_required",
+                message=(
+                    "A whole-market screener is unrelated to this single-instrument request "
+                    "until the requested instrument has been resolved. Call search_symbol first."
+                ),
+            )
 
         symbols = tuple(self._extract_symbol_arguments(arguments))
         if not symbols:
@@ -601,6 +949,16 @@ class GroundingLedger:
             answer hash and structured issues is appended to the artifact.
         """
         issues: list[dict[str, Any]] = []
+        if self._looks_like_meta_delivery(content):
+            issues.append(
+                {
+                    "code": "meta_delivery_without_report",
+                    "message": (
+                        "The draft claims that a report was already delivered but does not "
+                        "contain the report body. State the findings or ask for clarification."
+                    ),
+                }
+            )
         issues.extend(self._validate_identity(content))
         issues.extend(self._validate_price_claims(content))
         result = ValidationResult(valid=not issues, issues=issues)
@@ -635,8 +993,13 @@ class GroundingLedger:
 
     def safe_fallback(self) -> str:
         """Return a deterministic fail-closed answer after repeated rejection."""
-        is_zh = bool(re.search(r"[\u3400-\u9fff]", self.user_message))
+        is_zh = self._prefer_chinese
         price_records = self._price_records()
+        primary_price_records = [
+            record for record in price_records if record.symbol in self._primary_symbols
+        ]
+        if primary_price_records:
+            price_records = primary_price_records
         if price_records:
             by_symbol: dict[str, list[EvidenceRecord]] = {}
             for record in price_records:
@@ -655,24 +1018,83 @@ class GroundingLedger:
             joined = "；".join(facts) if is_zh else "; ".join(facts)
             if is_zh:
                 return (
-                    "为避免输出与工具证据冲突的价格，我已拒绝上一版答案。"
-                    f"当前可验证的已观测 OHLC 范围是：{joined}。"
-                    "在重新核对标的或明确展示推导公式前，我不会生成买入价。"
+                    f"当前已核验到的已观测 OHLC 范围是：{joined}。"
+                    "现有证据不足以推导可靠的买入价；如需继续，我可以基于这组数据说明趋势、"
+                    "风险和分批入场条件。"
                 )
             return (
-                "I rejected the previous draft because its prices conflicted with tool evidence. "
                 f"The verified observed OHLC range is: {joined}. "
-                "I will not invent an entry price without a visible derivation or refreshed evidence."
+                "The available evidence is not sufficient to derive a reliable entry price; "
+                "I can still explain the trend, risks, and staged-entry conditions from these data."
             )
-        if is_zh:
+        locked_symbols = sorted(self._primary_symbols or self.authorized_symbols)
+        if locked_symbols:
+            joined_symbols = "、".join(locked_symbols)
+            if is_zh:
+                return (
+                    f"已确认你讨论的标的是 {joined_symbols}，但本轮交易所接口没有返回可验证的实时行情。"
+                    "我不会用同名股票或旧快照冒充当前价格；请提供交易平台的现价/盘口截图，"
+                    "我可以据此计算持仓盈亏、止损和分批卖出条件。"
+                )
             return (
-                "当前无法安全确认标的身份或价格证据，因此没有生成交易结论。"
-                "请确认候选证券代码和交易所后再继续。"
+                f"The active instrument is confirmed as {joined_symbols}, but the current venue "
+                "did not return verifiable live quotes. I will not substitute a same-name stock "
+                "or stale snapshot; provide the venue's current price/order-book screenshot and "
+                "I can calculate position P&L, stop-loss, and staged exits."
             )
-        return (
-            "I could not safely lock the instrument identity or price evidence, so I did not "
-            "produce a trading conclusion. Please confirm the candidate symbol and venue."
+        candidates: list[dict[str, Any]] = []
+        seen_candidates: set[str] = set()
+        for record in self._identities.values():
+            if record.status not in {"ambiguous", "conflicting"}:
+                continue
+            if (self._primary_queries or self._primary_symbols) and not self._is_primary_record(record):
+                continue
+            for candidate in record.candidates:
+                symbol = _normalize_symbol(candidate.get("symbol"))
+                if not symbol or symbol in seen_candidates:
+                    continue
+                seen_candidates.add(symbol)
+                candidates.append(candidate)
+        if candidates:
+            if _CRYPTO_REQUEST_RE.search(self.user_message):
+                candidates.sort(
+                    key=lambda item: (
+                        str(item.get("type") or "").casefold() != "cryptocurrency",
+                        _normalize_symbol(item.get("symbol")),
+                    )
+                )
+            labels = []
+            for candidate in candidates[:6]:
+                symbol = _normalize_symbol(candidate.get("symbol"))
+                name = str(candidate.get("name") or "").strip()
+                exchange = str(candidate.get("exchange") or "").strip()
+                details = " / ".join(item for item in (name, exchange) if item)
+                labels.append(f"{symbol}（{details}）" if details else symbol)
+            joined_candidates = "；".join(labels) if is_zh else "; ".join(labels)
+            if is_zh:
+                return (
+                    "未能确认唯一可交易标的。检索到的候选包括："
+                    f"{joined_candidates}。这些代码代表不同产品，当前没有核验到唯一的"
+                    "交易所实时盘口，因此没有生成买入结论。请指定你看到它的具体平台"
+                    "和交易对。"
+                )
+            return (
+                "I could not confirm one unique tradable instrument. Candidates include: "
+                f"{joined_candidates}. They represent different products, and no unique "
+                "exchange order book was verified. Please specify the platform and pair."
+            )
+        return self.clarification_prompt()
+
+    @staticmethod
+    def _looks_like_meta_delivery(content: str) -> bool:
+        """Reject a short meta-message that falsely claims a hidden report exists."""
+        text = str(content or "").strip()
+        if not text or len(text) > 1_200 or not _META_DELIVERY_RE.search(text):
+            return False
+        has_body = bool(
+            re.search(r"(?:^|\n)\s{0,3}#{1,4}\s+|(?:结论|核心结论|交易对|风险|建议|findings|conclusion)", text, re.I)
         )
+        return not has_body
 
     def persist(self) -> None:
         """Atomically persist the current structured ledger."""
@@ -702,6 +1124,18 @@ class GroundingLedger:
     def _seed_symbols(self, text: str, *, source: str) -> None:
         """Lock exact symbols explicitly supplied by a user."""
         for match in _CANONICAL_SYMBOL_RE.finditer(text or ""):
+            # Examples in a prompt are instructions, not the user's selected
+            # instrument (e.g. "交易对，例如 SKHY-USDT").  Treating them as
+            # authoritative creates a second identity and can mix a token with
+            # a same-named listed security.
+            prefix = (text or "")[max(0, match.start() - 8) : match.start()]
+            if re.search(
+                r"(?:例如|比如|譬如|如|不要使用|不要用|不得使用|"
+                r"切勿使用|e\.g\.?|such\s+as|do\s+not\s+use|don't\s+use)\s*$",
+                prefix,
+                re.I,
+            ):
+                continue
             symbol = _normalize_symbol(match.group(0))
             key = f"explicit:{symbol}"
             existing = self._identities.get(key)
@@ -720,10 +1154,263 @@ class GroundingLedger:
             self._identity_required = True
             self._buffer_output = True
 
+    def _seed_followup_history(
+        self,
+        history: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Inherit the nearest trusted identity for an elliptical follow-up.
+
+        New session replies carry a structured ``grounding_identity`` summary.
+        That is preferred over prose parsing.  For sessions created before the
+        summary existed, walk backward through user turns only: skip other
+        elliptical follow-ups, accept the first explicit canonical symbol, and
+        stop at the first subject-setting message without a symbol.  The stop
+        prevents an old AAPL symbol from authorizing a later SpaceX discussion.
+        """
+        reversed_history = list(reversed(history))
+        for position, message in enumerate(reversed_history):
+            if str(message.get("role") or "").casefold() != "assistant":
+                continue
+            summary = message.get("grounding_identity")
+            if not isinstance(summary, Mapping):
+                metadata = message.get("metadata")
+                summary = (
+                    metadata.get("grounding_identity")
+                    if isinstance(metadata, Mapping)
+                    else None
+                )
+            if not isinstance(summary, Mapping):
+                continue
+            # The nearest audited turn is authoritative even when it resolved
+            # to not-found/ambiguous.  The narrowly-scoped recovery below is
+            # the only exception: it applies when the failed query is the
+            # same symbol as an older lock and the user is managing a fill.
+            if summary.get("status") != "locked":
+                # Older runs did not persist a primary-symbol scope.  If such
+                # a run ended with a mixed/ambiguous summary, recover only the
+                # single locked record matching the immediately preceding
+                # user's explicit code (for example, 513330 -> 513330.SH).
+                # This preserves stale-subject protection for natural-language
+                # subject changes while making a safe "继续" useful after the
+                # old peer-lookup bug.
+                if _REFERENTIAL_FOLLOWUP_RE.fullmatch(self.user_message or ""):
+                    subject_hints: set[str] = set()
+                    for prior in reversed_history[position + 1 :]:
+                        if str(prior.get("role") or "").casefold() != "user":
+                            continue
+                        content = str(prior.get("content") or "")
+                        subject_hints.update(
+                            _normalize_symbol(match.group(0))
+                            for match in _CANONICAL_SYMBOL_RE.finditer(content)
+                        )
+                        subject_hints.update(_BARE_NUMERIC_CODE_RE.findall(content))
+                        if subject_hints:
+                            break
+                        if not _REFERENTIAL_FOLLOWUP_RE.fullmatch(content):
+                            break
+                    locked_records = [
+                        raw
+                        for raw in (summary.get("records") or [])
+                        if isinstance(raw, Mapping) and raw.get("status") == "locked"
+                    ]
+                    matching: list[Mapping[str, Any]] = []
+                    for raw in locked_records:
+                        symbol = _normalize_symbol(raw.get("symbol"))
+                        if not symbol:
+                            continue
+                        base = symbol.split(".", 1)[0]
+                        if any(
+                            hint == symbol
+                            or hint == base
+                            or symbol.startswith(f"{hint}.")
+                            for hint in subject_hints
+                        ):
+                            matching.append(raw)
+                    if len(matching) == 1:
+                        symbol = _normalize_symbol(matching[0].get("symbol"))
+                        self._inherit_identity_record(symbol, matching[0])
+                        self._primary_symbols.add(symbol)
+                        return
+                    # A subsequent failed retry may have replaced the useful
+                    # legacy summary with an empty ``invalidated`` record. If
+                    # that failed query still names the preceding subject,
+                    # keep walking backward to the older audited summary.
+                    if not locked_records and subject_hints:
+                        failed_queries = {
+                            _query_key(raw.get("query"))
+                            for raw in (summary.get("records") or [])
+                            if isinstance(raw, Mapping) and raw.get("query")
+                        }
+                        if any(
+                            any(hint.casefold() in query for hint in subject_hints)
+                            for query in failed_queries
+                        ):
+                            continue
+                # A failed retry can leave an ``invalidated`` resolver record
+                # for the very symbol that was already locked one turn earlier
+                # (for example, a transient Yahoo outage on ``SKHY.US``).  For
+                # a narrow fill-management follow-up, recover that exact prior
+                # lock instead of making the user repeat the identity.  A
+                # generic “continue” still fails closed, preserving the stale
+                # subject protection below.
+                if _TRADE_MANAGEMENT_FOLLOWUP_RE.fullmatch(self.user_message or ""):
+                    failed_symbols = {
+                        _normalize_symbol(raw.get("query") or raw.get("symbol"))
+                        for raw in (summary.get("records") or [])
+                        if isinstance(raw, Mapping)
+                        and _normalize_symbol(raw.get("query") or raw.get("symbol"))
+                    }
+                    prior_locked_symbols: set[str] = set()
+                    for older in reversed_history[position + 1 :]:
+                        if str(older.get("role") or "").casefold() != "assistant":
+                            continue
+                        older_summary = older.get("grounding_identity")
+                        if not isinstance(older_summary, Mapping):
+                            older_metadata = older.get("metadata")
+                            older_summary = (
+                                older_metadata.get("grounding_identity")
+                                if isinstance(older_metadata, Mapping)
+                                else None
+                            )
+                        if not isinstance(older_summary, Mapping):
+                            continue
+                        if older_summary.get("status") == "locked":
+                            prior_locked_symbols.update(
+                                _normalize_symbol(symbol)
+                                for symbol in older_summary.get("authorized_symbols", [])
+                                if _normalize_symbol(symbol)
+                            )
+                            for raw in older_summary.get("records") or []:
+                                if isinstance(raw, Mapping) and raw.get("status") == "locked":
+                                    symbol = _normalize_symbol(raw.get("symbol"))
+                                    if symbol:
+                                        prior_locked_symbols.add(symbol)
+                    if failed_symbols & prior_locked_symbols:
+                        continue
+                return
+            authorized = {
+                _normalize_symbol(symbol)
+                for symbol in summary.get("authorized_symbols", [])
+                if _normalize_symbol(symbol)
+            }
+            records = summary.get("records")
+            if not isinstance(records, list):
+                return
+            raw_primary = summary.get("primary_symbols")
+            if isinstance(raw_primary, list):
+                inherited_scope = {
+                    _normalize_symbol(symbol)
+                    for symbol in raw_primary
+                    if _normalize_symbol(symbol) in authorized
+                }
+            elif len(authorized) == 1:
+                inherited_scope = set(authorized)
+            else:
+                # Legacy locked summaries did not distinguish the requested
+                # instrument from locked peers. Recover a unique code match
+                # from the preceding user turn; otherwise fail closed instead
+                # of treating every peer as a primary subject.
+                subject_hints: set[str] = set()
+                for prior in reversed_history[position + 1 :]:
+                    if str(prior.get("role") or "").casefold() != "user":
+                        continue
+                    content = str(prior.get("content") or "")
+                    subject_hints.update(
+                        _normalize_symbol(match.group(0))
+                        for match in _CANONICAL_SYMBOL_RE.finditer(content)
+                    )
+                    subject_hints.update(_BARE_NUMERIC_CODE_RE.findall(content))
+                    if subject_hints:
+                        break
+                    if not _REFERENTIAL_FOLLOWUP_RE.fullmatch(content):
+                        break
+                matched = {
+                    symbol
+                    for symbol in authorized
+                    if any(
+                        hint == symbol
+                        or hint == symbol.split(".", 1)[0]
+                        or symbol.startswith(f"{hint}.")
+                        for hint in subject_hints
+                    )
+                }
+                inherited_scope = matched if len(matched) == 1 else set()
+            if not inherited_scope:
+                return
+            for raw_record in records:
+                if not isinstance(raw_record, Mapping):
+                    continue
+                symbol = _normalize_symbol(raw_record.get("symbol"))
+                if raw_record.get("status") != "locked" or symbol not in inherited_scope:
+                    continue
+                self._inherit_identity_record(symbol, raw_record)
+            return
+
+        for message in reversed(history):
+            if str(message.get("role") or "").casefold() != "user":
+                continue
+            content = str(message.get("content") or "")
+            symbols = [
+                _normalize_symbol(match.group(0))
+                for match in _CANONICAL_SYMBOL_RE.finditer(content)
+            ]
+            if symbols:
+                for symbol in symbols:
+                    self._inherit_identity_record(symbol, {})
+                return
+            if not _REFERENTIAL_FOLLOWUP_RE.fullmatch(content):
+                return
+
+    def _inherit_identity_record(
+        self,
+        symbol: str,
+        record: Mapping[str, Any],
+    ) -> None:
+        """Copy one previously locked identity into this run's audit ledger."""
+        key = f"history:{symbol}"
+        prior_sources = record.get("source")
+        sources = (
+            [str(item) for item in prior_sources if str(item).strip()]
+            if isinstance(prior_sources, list)
+            else []
+        )
+        if "session_history" not in sources:
+            sources.append("session_history")
+        self._identities[key] = IdentityRecord(
+            query=symbol,
+            status="locked",
+            symbol=symbol,
+            venue=str(record.get("venue") or "").strip() or _infer_venue(symbol),
+            instrument_type=(
+                str(record.get("instrument_type") or "").strip()
+                or _infer_instrument_type(symbol)
+            ),
+            currency=(
+                str(record.get("currency") or "").strip() or _infer_currency(symbol)
+            ),
+            source_tool_call_id="session_history",
+            source=sources,
+        )
+        self._inherited_symbols.add(symbol)
+        self._primary_symbols.add(symbol)
+        self._identity_required = True
+        self._buffer_output = True
+
     def _begin_resolution(self, query: str, call_id: str) -> None:
         """Enter unresolved state before the resolver executes."""
         key = _query_key(query) or f"call:{call_id}"
+        if not self._screening_request and not self._primary_queries and not self._primary_symbols:
+            # For natural-language requests without a canonical code, the
+            # first resolver query is the best available subject hint. Later
+            # peer/benchmark lookups are auxiliary identities.
+            self._primary_queries.add(key)
         existing = self._identities.get(key)
+        if existing and existing.status == "locked":
+            # A repeated resolver lookup is only advisory until it returns a
+            # concrete candidate. Do not erase a verified lock while the retry
+            # is in flight; batch snapshots still prevent same-turn races.
+            self.persist()
+            return
         self._identities[key] = IdentityRecord(
             query=query,
             status="unresolved",
@@ -741,6 +1428,8 @@ class GroundingLedger:
         query = str(arguments.get("query") or "")
         key = _query_key(query) or f"call:{call_id}"
         existing = self._identities.get(key)
+        if existing and existing.status == "locked":
+            return
         self._identities[key] = IdentityRecord(
             query=query,
             status="invalidated",
@@ -763,6 +1452,8 @@ class GroundingLedger:
         version = (existing.version + 1) if existing else 1
 
         if not isinstance(payload, dict) or payload.get("ok") is False:
+            if existing and existing.status == "locked":
+                return
             self._identities[key] = IdentityRecord(
                 query=query,
                 status="invalidated",
@@ -780,6 +1471,8 @@ class GroundingLedger:
                 for name, value in sources.items()
                 if str(value).casefold() == "ok"
             ]
+            if existing and existing.status == "locked":
+                return
             self._identities[key] = IdentityRecord(
                 query=query,
                 status="not_found" if len(clean_sources) >= 2 else "invalidated",
@@ -790,7 +1483,8 @@ class GroundingLedger:
             )
             return
 
-        chosen = self._choose_candidate(query, candidates)
+        choice_candidates = self._venue_compatible_candidates(query, candidates)
+        chosen = self._choose_candidate(query, choice_candidates)
         if chosen is None:
             self._identities[key] = IdentityRecord(
                 query=query,
@@ -803,10 +1497,33 @@ class GroundingLedger:
 
         symbol = _normalize_symbol(chosen.get("symbol"))
         if not symbol:
+            if existing and existing.status == "locked":
+                return
             self._identities[key] = IdentityRecord(
                 query=query,
                 status="invalidated",
                 source_tool_call_id=call_id,
+                candidates=candidates,
+                version=version,
+            )
+            return
+
+        resolved_type = _infer_instrument_type(symbol, chosen.get("type"))
+        if _CRYPTO_REQUEST_RE.search(self.user_message) and resolved_type != "crypto":
+            source_names = []
+            for value in [chosen.get("source"), *(chosen.get("also_from") or [])]:
+                name = str(value or "").strip()
+                if name and name not in source_names:
+                    source_names.append(name)
+            self._identities[key] = IdentityRecord(
+                query=query,
+                status="conflicting",
+                venue=str(chosen.get("exchange") or chosen.get("market") or "").strip()
+                or _infer_venue(symbol),
+                instrument_type=resolved_type,
+                currency=_infer_currency(symbol),
+                source_tool_call_id=call_id,
+                source=source_names,
                 candidates=candidates,
                 version=version,
             )
@@ -857,14 +1574,38 @@ class GroundingLedger:
             status="locked",
             symbol=symbol,
             venue=venue,
-            instrument_type=_infer_instrument_type(symbol, chosen.get("type")),
+            instrument_type=resolved_type,
             currency=_infer_currency(symbol),
             source_tool_call_id=call_id,
             source=source_names,
             candidates=candidates,
             version=version,
         )
+        if self._query_matches_primary_hint(query):
+            self._primary_symbols.add(symbol)
         self._supersede_shortlists(symbol)
+
+    @staticmethod
+    def _venue_compatible_candidates(
+        query: str,
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Apply deterministic venue families to bare Chinese listed codes.
+
+        Five-digit codes use the project's Hong Kong convention; six-digit
+        codes use mainland exchanges.  This prevents a sparse Yahoo response
+        for ``00700`` from silently locking an unrelated ``00700.TW`` product.
+        Explicitly qualified queries are unaffected.
+        """
+        compact = str(query or "").strip()
+        if not _BARE_LISTED_CODE_RE.fullmatch(compact):
+            return candidates
+        allowed = (".HK",) if len(compact) == 5 else (".SH", ".SZ", ".BJ")
+        return [
+            candidate
+            for candidate in candidates
+            if _normalize_symbol(candidate.get("symbol")).endswith(allowed)
+        ]
 
     def _supersede_shortlists(self, symbol: str) -> None:
         """Retire ambiguous shortlists that this lock has just answered.
@@ -888,14 +1629,28 @@ class GroundingLedger:
                     record, status="superseded", updated_at=_utc_now()
                 )
 
-    @staticmethod
     def _choose_candidate(
+        self,
         query: str,
         candidates: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         """Choose only a unique or strongly corroborated resolver candidate."""
         if len(candidates) == 1:
             return candidates[0]
+        # A bare crypto name is not enough to select one venue-specific pair.
+        # For example, SKHY may resolve to both SKHYB/USDT and SKHY/USDC; the
+        # model must ask the user instead of silently preferring the candidate
+        # whose base happens to match the query exactly.
+        if _CRYPTO_REQUEST_RE.search(self.user_message):
+            crypto_candidates = [
+                candidate
+                for candidate in candidates
+                if _infer_instrument_type(
+                    _normalize_symbol(candidate.get("symbol")), candidate.get("type")
+                ) == "crypto"
+            ]
+            if len(crypto_candidates) > 1:
+                return None
         normalized_query = re.sub(r"[^a-z0-9\u3400-\u9fff]", "", query.casefold())
         exact: list[dict[str, Any]] = []
         strong: list[dict[str, Any]] = []
@@ -908,9 +1663,16 @@ class GroundingLedger:
                 re.sub(r"[^a-z0-9\u3400-\u9fff]", "", name.casefold()),
                 re.sub(r"[^a-z0-9\u3400-\u9fff]", "", symbol.casefold()),
             }
-            if normalized_query and normalized_query in comparable:
+            normalized_name = re.sub(r"[^a-z0-9\u3400-\u9fff]", "", name.casefold())
+            if normalized_query and (
+                normalized_query in comparable
+                or (
+                    len(normalized_name) >= 4
+                    and normalized_name in normalized_query
+                )
+            ):
                 exact.append(candidate)
-            if candidate.get("also_from") or candidate.get("cik"):
+            if candidate.get("also_from"):
                 strong.append(candidate)
         if len(exact) == 1:
             return exact[0]
@@ -1127,7 +1889,7 @@ class GroundingLedger:
             "ambiguous",
             "conflicting",
             "invalidated",
-        }:
+        } and not self._is_safe_identity_abstention(content):
             issues.append(
                 {
                     "code": "identity_not_locked",
@@ -1155,6 +1917,45 @@ class GroundingLedger:
             )
         return issues
 
+    @staticmethod
+    def _is_safe_identity_abstention(content: str) -> bool:
+        """Allow a truthful clarification when identity cannot be locked.
+
+        The identity gate exists to block unsupported market conclusions, not
+        to suppress a useful answer that names the ambiguity and asks the user
+        for the missing venue or contract.  An abstention containing a concrete
+        buy/sell recommendation remains blocked.
+        """
+        return bool(_IDENTITY_ABSTENTION_RE.search(content)) and not bool(
+            _UNSAFE_MARKET_CONCLUSION_RE.search(content)
+        )
+
+    @staticmethod
+    def _is_historical_price_context(content: str) -> bool:
+        """Recognize dated reference prices that are not current claims.
+
+        Follow-up reports often restate a prior-turn close (for example,
+        ``ADR 8/5 收盘 $151.03``) while the current venue's live endpoint is
+        unavailable. The number is useful context but is not a new entry
+        quote; rejecting the entire answer for lacking a same-turn OHLC row
+        turns a transient data outage into a generic identity refusal.
+        """
+        has_date = bool(
+            _DATE_RE.search(content)
+            or _COMPACT_SLASH_DATE_RE.search(content)
+            or _COMPACT_MARKET_DATE_RE.search(content)
+            or _LOCALIZED_DATE_RE.search(content)
+        )
+        has_reference_label = bool(
+            re.search(r"收盘|开盘|closing|close|historical|历史|此前|ADR", content, re.IGNORECASE)
+        )
+        # A sentence explicitly claiming an "observed" close still requires
+        # same-turn evidence; only prior/reference wording may use this
+        # leniency.
+        return has_date and has_reference_label and not bool(
+            re.search(r"已观测|observed", content, re.IGNORECASE)
+        )
+
     def _validate_price_claims(self, content: str) -> list[dict[str, Any]]:
         """Check Markdown OHLC tables and price prose against observed records."""
         issues, table_lines = self._validate_price_tables(content)
@@ -1167,9 +1968,26 @@ class GroundingLedger:
         for index, line in enumerate(content.splitlines()):
             if index in table_lines or "|" in line:
                 continue
+            # Markdown section numbers are labels, not financial values:
+            # "## 2️⃣ 现货价格" must not be compared with OHLC evidence.
+            if re.match(r"^\s{0,3}#{1,6}\s", line):
+                continue
             line_symbol = self._symbol_for_claim(line, records)
             for segment in _CLAUSE_SEPARATOR_RE.split(line):
                 if not _PRICE_CONTEXT_RE.search(segment):
+                    continue
+                # A clearly labelled conflicting/aggregate quote is useful
+                # context even when the main answer has a locked identity. It
+                # must not be treated as a claim about the locked instrument;
+                # concrete buy/sell recommendations remain subject to the
+                # normal evidence gate.
+                if (
+                    (
+                        _UNVERIFIED_PRICE_CLAIM_RE.search(segment)
+                        or self._is_historical_price_context(segment)
+                    )
+                    and not _UNSAFE_MARKET_CONCLUSION_RE.search(segment)
+                ):
                     continue
                 values = self._numbers_without_dates_or_percent(segment)
                 if not values:
@@ -1379,6 +2197,12 @@ class GroundingLedger:
         candidates = records
         if symbol:
             candidates = [record for record in candidates if record.symbol == symbol]
+        elif self._primary_symbols:
+            primary_candidates = [
+                record for record in candidates if record.symbol in self._primary_symbols
+            ]
+            if len({record.symbol for record in primary_candidates if record.symbol}) == 1:
+                candidates = primary_candidates
         symbols = sorted({record.symbol for record in candidates if record.symbol})
         if not symbol and len(symbols) == 1:
             symbol = symbols[0]
@@ -1456,8 +2280,11 @@ class GroundingLedger:
             Candidate price values, in order of appearance.
         """
         masked = _CANONICAL_SYMBOL_RE.sub(" ", text)
+        masked = _ORDERED_LIST_PREFIX_RE.sub(" ", masked)
         masked = _LOCALIZED_DATE_RE.sub(" ", masked)
         masked = _DATE_RE.sub(" ", masked)
+        masked = _COMPACT_MARKET_DATE_RE.sub(" ", masked)
+        masked = _COMPACT_SLASH_DATE_RE.sub(" ", masked)
         masked = _AGGREGATE_AMOUNT_RE.sub(" ", masked)
         without_dates = _QUANTITY_WITH_UNIT_RE.sub(" ", masked)
         values: list[float] = []

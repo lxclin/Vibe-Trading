@@ -161,6 +161,83 @@ class TestSymbolSearchSuccess:
         assert "sec_edgar" not in payload["data"]["sources"]
         mock_cik.assert_not_called()
 
+    def test_yahoo_shanghai_suffix_is_normalized_to_project_convention(self):
+        """Yahoo's .SS alias must be locked as the project's canonical .SH."""
+        yahoo_quotes = [
+            {
+                "symbol": "601012.SS",
+                "shortname": "LONGI GREEN ENERGY TECHNOLOGY C",
+                "exchange": "SHH",
+                "quoteType": "EQUITY",
+            }
+        ]
+        with patch.object(
+            ss.eastmoney_client,
+            "get_json",
+            side_effect=RuntimeError("temporary upstream failure"),
+        ), patch.object(
+            ss.yahoo_client, "search", return_value=yahoo_quotes
+        ), patch.object(
+            ss.sec_edgar_client, "cik_for"
+        ) as mock_cik:
+            out = ss.SymbolSearchTool().execute(query="601012")
+
+        payload = json.loads(out)
+        candidate = payload["data"]["candidates"][0]
+        assert candidate["symbol"] == "601012.SH"
+        assert candidate["market"] == "cn"
+        assert candidate["exchange"] == "SHH"
+        mock_cik.assert_not_called()
+
+    def test_mixed_code_and_name_prefers_exact_code_query(self):
+        """Real model calls like '513330 恒生互联网ETF' must resolve by code."""
+        yahoo_quotes = [
+            {
+                "symbol": "513330.SS",
+                "shortname": "CHINAAMC HANG SENG INTERNET ETF",
+                "exchange": "SHH",
+                "quoteType": "ETF",
+            }
+        ]
+        with patch.object(
+            ss.eastmoney_client, "get_json", return_value={"QuotationCodeTable": {"Data": []}}
+        ) as mock_em, patch.object(
+            ss.yahoo_client, "search", return_value=yahoo_quotes
+        ) as mock_yahoo, patch.object(
+            ss.sec_edgar_client, "cik_for"
+        ):
+            out = ss.SymbolSearchTool().execute(query="513330 恒生互联网ETF")
+
+        payload = json.loads(out)
+        assert payload["data"]["query"] == "513330 恒生互联网ETF"
+        assert payload["data"]["resolved_query"] == "513330"
+        assert payload["data"]["candidates"][0]["symbol"] == "513330.SH"
+        assert mock_em.call_args.kwargs["params"]["input"] == "513330"
+        mock_yahoo.assert_called_once_with("513330")
+
+    def test_multiple_code_tokens_do_not_guess_one(self):
+        with patch.object(
+            ss.eastmoney_client, "get_json", return_value={"QuotationCodeTable": {"Data": []}}
+        ) as mock_em, patch.object(
+            ss.yahoo_client, "search", return_value=[]
+        ) as mock_yahoo:
+            ss.SymbolSearchTool().execute(query="比较 513330 和 159605")
+
+        assert mock_em.call_args.kwargs["params"]["input"] == "比较 513330 和 159605"
+        mock_yahoo.assert_called_once_with("比较 513330 和 159605")
+
+    def test_project_qualified_code_uses_bare_provider_query(self):
+        """Canonical project suffixes must not make provider lookup fail."""
+        with patch.object(
+            ss.eastmoney_client, "get_json", return_value={"QuotationCodeTable": {"Data": []}}
+        ) as mock_em, patch.object(
+            ss.yahoo_client, "search", return_value=[]
+        ) as mock_yahoo:
+            ss.SymbolSearchTool().execute(query="513330.SH")
+
+        assert mock_em.call_args.kwargs["params"]["input"] == "513330"
+        mock_yahoo.assert_called_once_with("513330")
+
 
 class TestSymbolSearchErrors:
     """Error envelopes and per-source resilience."""

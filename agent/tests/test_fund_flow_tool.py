@@ -110,7 +110,9 @@ class TestPerSymbolIsolation:
             text = FundFlowTool().execute(codes=["600519.SH"])
 
         payload = json.loads(text)
-        assert payload["ok"] is True
+        assert payload["ok"] is False
+        assert payload["partial"] is False
+        assert payload["failed_symbols"] == ["600519.SH"]
         assert "429" in payload["data"]["600519.SH"]["error"]
 
     def test_http_failure_uses_tushare_fallback_when_available(self):

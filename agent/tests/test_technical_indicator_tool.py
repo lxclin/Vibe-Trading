@@ -138,7 +138,9 @@ class TestTechnicalIndicatorToolIntegration:
 
     def test_execute_success(self, monkeypatch, sample_df):
         """Full pipeline: fetch → compute → JSON output."""
+        calls = []
         def _mock_fetch(**kwargs):
+            calls.append(kwargs)
             return {"AAPL": sample_df}
         monkeypatch.setattr(
             "src.tools.technical_indicator_tool.fetch_market_data",
@@ -157,6 +159,58 @@ class TestTechnicalIndicatorToolIntegration:
         assert result["indicators"]["ema_20"] is not None
         assert result["latest_close"] == 349.0
         assert result["latest_date"] is not None
+        assert calls[0]["interval"] == "1D"
+
+    @pytest.mark.parametrize(
+        ("requested", "expected"),
+        [("1d", "1D"), ("1wk", "1W"), ("1mo", "1M")],
+    )
+    def test_execute_normalizes_public_interval_aliases(
+        self, monkeypatch, sample_df, requested, expected
+    ):
+        calls = []
+        monkeypatch.setattr(
+            "src.tools.technical_indicator_tool.fetch_market_data",
+            lambda **kwargs: calls.append(kwargs) or {"AAPL": sample_df},
+        )
+        result = json.loads(TechnicalIndicatorTool().execute(symbol="AAPL", interval=requested))
+        assert result["ok"] is True
+        assert calls[0]["interval"] == expected
+
+    def test_execute_real_market_data_records(self, monkeypatch, sample_df):
+        """The production market-data helper returns a list of records."""
+        records = sample_df.reset_index(names="date").to_dict(orient="records")
+        monkeypatch.setattr(
+            "src.tools.technical_indicator_tool.fetch_market_data",
+            lambda **kw: {"AAPL": records},
+        )
+        result = json.loads(TechnicalIndicatorTool().execute(symbol="AAPL"))
+        assert result["ok"] is True
+        assert result["latest_close"] == 349.0
+        assert result["latest_date"].startswith("2024-12")
+
+    def test_execute_trade_date_records_preserve_latest_date(self, monkeypatch, sample_df):
+        records = (
+            sample_df.reset_index(names="trade_date").to_dict(orient="records")
+        )
+        monkeypatch.setattr(
+            "src.tools.technical_indicator_tool.fetch_market_data",
+            lambda **kw: {"AAPL": records},
+        )
+        result = json.loads(TechnicalIndicatorTool().execute(symbol="AAPL"))
+        assert result["ok"] is True
+        assert result["latest_date"].startswith("2024-12")
+
+    def test_execute_truncated_market_data_envelope(self, monkeypatch, sample_df):
+        """The max_rows cap may wrap records in a ``data`` envelope."""
+        records = sample_df.reset_index(names="date").to_dict(orient="records")
+        monkeypatch.setattr(
+            "src.tools.technical_indicator_tool.fetch_market_data",
+            lambda **kw: {"AAPL": {"rows": len(records), "data": records[:50]}},
+        )
+        result = json.loads(TechnicalIndicatorTool().execute(symbol="AAPL"))
+        assert result["ok"] is True
+        assert result["latest_close"] == 149.0
 
     def test_execute_dataframe_with_adj_close(self, monkeypatch, sample_close):
         """Loader returns 'adj_close' instead of 'close'."""

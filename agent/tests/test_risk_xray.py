@@ -256,6 +256,21 @@ def test_tool_survives_records_without_dates():
     assert payload["status"] == "ok"
 
 
+def test_tool_accepts_truncated_market_data_envelope():
+    records = [
+        {"date": f"2026-01-{i + 1:02d}", "close": 100.0 + i}
+        for i in range(60)
+    ]
+
+    def fetch(*, codes, start_date, end_date, source, interval, **kwargs):
+        return {
+            "AAA": {"rows": len(records), "returned": 40, "data": records[:40]},
+        }
+
+    payload = json.loads(PortfolioRiskXrayTool(data_fetcher=fetch).execute(symbols=["AAA"]))
+    assert payload["status"] == "ok"
+
+
 # ---------------------------------------------------------------------------
 # average_invested_weights / artifact writers (run emission slice)
 

@@ -31,6 +31,18 @@ _EMA_PERIOD = 20
 _DEFAULT_LOOKBACK = 200
 _MAX_LOOKBACK = 500
 
+_INTERVAL_ALIASES = {
+    "1d": "1D",
+    "d": "1D",
+    "daily": "1D",
+    "1wk": "1W",
+    "1w": "1W",
+    "weekly": "1W",
+    "1mo": "1M",
+    "1mth": "1M",
+    "monthly": "1M",
+}
+
 
 def _compute_sma(close: pd.Series, period: int) -> float | None:
     """Simple moving average over the last *period* bars."""
@@ -144,7 +156,8 @@ class TechnicalIndicatorTool(BaseTool):
 
     def execute(self, **kwargs: Any) -> str:
         symbol = str(kwargs.get("symbol", "")).strip()
-        interval = str(kwargs.get("interval", "1d")).strip()
+        interval_raw = str(kwargs.get("interval", "1d")).strip()
+        interval = _INTERVAL_ALIASES.get(interval_raw.casefold(), interval_raw)
         lookback_raw = kwargs.get("lookback", _DEFAULT_LOOKBACK)
 
         if not symbol:
@@ -172,11 +185,48 @@ class TechnicalIndicatorTool(BaseTool):
             logger.debug("fetch_market_data failed for %s: %s", symbol, exc)
             return json.dumps({"ok": False, "error": f"Failed to fetch data: {exc}"})
 
-        df = data.get(symbol)
-        if df is None or df.empty:
+        raw = data.get(symbol)
+        if raw is None:
             return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
 
-        close = df.get("close") if isinstance(df, pd.DataFrame) else None
+        # ``fetch_market_data`` is a JSON-facing helper and therefore returns
+        # records (``list[dict]``), optionally wrapped in a truncation envelope,
+        # rather than a pandas DataFrame.  The original implementation assumed
+        # the latter and crashed in real runs on ``raw.empty``.  Normalize both
+        # shapes here so the tool works with the production pipeline and with
+        # DataFrame-returning adapters used by callers/tests.
+        if isinstance(raw, pd.DataFrame):
+            df = raw.copy()
+        elif isinstance(raw, list):
+            df = pd.DataFrame(raw)
+        elif isinstance(raw, dict) and isinstance(raw.get("data"), list):
+            df = pd.DataFrame(raw["data"])
+        elif isinstance(raw, dict):
+            # A single row/map is not the usual contract, but accepting it
+            # keeps the error envelope deterministic for lightweight adapters.
+            df = pd.DataFrame([raw])
+        else:
+            return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
+
+        if df.empty:
+            return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
+
+        # Record-oriented responses carry their date as a column.  Promote it
+        # to the index so ``latest_date`` remains meaningful instead of
+        # reporting a row number (0, 1, ...).
+        if not isinstance(raw, pd.DataFrame):
+            for date_key in ("trade_date", "date", "datetime", "timestamp", "time", "index"):
+                if date_key in df.columns:
+                    parsed = pd.to_datetime(df[date_key], errors="coerce")
+                    if parsed.notna().any():
+                        df = df.assign(_indicator_date=parsed).set_index("_indicator_date")
+                        break
+
+        close = None
+        for key in ("close", "Close", "CLOSE", "adj_close", "Adj Close", "adjusted_close"):
+            if key in df.columns:
+                close = df[key]
+                break
         if close is None:
             # Some loaders return a dict-like structure; try common key names.
             if hasattr(df, "to_dict"):
@@ -190,6 +240,9 @@ class TechnicalIndicatorTool(BaseTool):
 
         if not isinstance(close, pd.Series):
             close = pd.Series(close)
+        close = pd.to_numeric(close, errors="coerce").dropna()
+        if close.empty:
+            return json.dumps({"ok": False, "error": "No numeric close price data returned"})
 
         # ── Compute indicators ────────────────────────────────────────────
         indicators: dict[str, Any] = {
