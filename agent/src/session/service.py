@@ -300,6 +300,9 @@ class SessionService:
                 value = result.get(key)
                 if value is not None:
                     reply_metadata[key] = value
+            grounding_identity = result.get("grounding_identity")
+            if isinstance(grounding_identity, dict):
+                reply_metadata["grounding_identity"] = grounding_identity
 
             reply = Message(
                 session_id=session.session_id, role="assistant",
@@ -543,7 +546,21 @@ class SessionService:
                 continue
             content = re.sub(r"Run directory:\s*\S+", _shorten_run_dir, content).strip()
             if content:
-                history.append({"role": role, "content": content})
+                item: Dict[str, Any] = {"role": role, "content": content}
+                if hasattr(msg, "metadata"):
+                    metadata = msg.metadata
+                elif isinstance(msg, dict):
+                    metadata = msg.get("metadata", {})
+                else:
+                    metadata = {}
+                grounding_identity = (
+                    metadata.get("grounding_identity")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                if role == "assistant" and isinstance(grounding_identity, dict):
+                    item["grounding_identity"] = grounding_identity
+                history.append(item)
 
         # Trim from the newest messages within a character budget of roughly 3000 tokens.
         MAX_HISTORY_CHARS = 12000

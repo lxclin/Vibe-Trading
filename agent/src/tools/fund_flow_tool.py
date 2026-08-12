@@ -239,8 +239,17 @@ class FundFlowTool(BaseTool):
             symbol: _fetch_symbol_flow(symbol, period=period, days=days)
             for symbol in (c.strip() for c in codes)
         }
+        successful = [
+            symbol
+            for symbol, result in results.items()
+            if isinstance(result, dict)
+            and not result.get("error")
+            and isinstance(result.get("rows"), list)
+            and bool(result["rows"])
+        ]
+        failed = [symbol for symbol in results if symbol not in successful]
         envelope = {
-            "ok": True,
+            "ok": bool(successful),
             "market": "stock",
             "source": "eastmoney",
             "fallback_sources": ["tushare"],
@@ -248,4 +257,9 @@ class FundFlowTool(BaseTool):
             "buckets": list(_BUCKETS),
             "data": results,
         }
+        if failed:
+            envelope["partial"] = bool(successful)
+            envelope["failed_symbols"] = failed
+        if not successful:
+            envelope["error"] = "No usable fund-flow data returned for the requested symbols"
         return json.dumps(envelope, ensure_ascii=False)

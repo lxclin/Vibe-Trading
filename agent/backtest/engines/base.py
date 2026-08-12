@@ -143,6 +143,64 @@ def _ffill_2d(arr: np.ndarray, limit: int = 5) -> np.ndarray:
     return out
 
 
+def _normalise_alignment_indexes(
+    indexes: list[pd.DatetimeIndex],
+) -> tuple[pd.DatetimeIndex, object | None]:
+    """Merge calendars without relying on pandas' internal datetime unit.
+
+    pandas 3.x may store a ``DatetimeIndex`` at microsecond resolution while
+    older releases commonly used nanoseconds.  Treating ``.asi8`` as an
+    implicit nanosecond value turns valid dates into January 1970.  Normalize
+    mixed timezone calendars to UTC and let the index retain its native unit;
+    callers use :func:`_alignment_epoch_ns` for integer lookups.
+    """
+    timezones = [index.tz for index in indexes]
+    aware_timezones = [timezone for timezone in timezones if timezone is not None]
+    target_tz = aware_timezones[0] if aware_timezones else None
+    # Normalize to one explicit unit before the fast numpy union.  This keeps
+    # the hot path close to the original vectorized implementation while
+    # avoiding the pandas-3.x ``asi8`` unit ambiguity.
+    merged_ns = np.unique(
+        np.concatenate([_alignment_epoch_ns(index, target_tz) for index in indexes])
+    )
+    units = [getattr(index, "unit", "ns") for index in indexes]
+    output_unit = units[0] if units and all(unit == units[0] for unit in units) else "ns"
+    values = merged_ns.astype("datetime64[ns]").astype(f"datetime64[{output_unit}]")
+    if target_tz is None:
+        merged = pd.DatetimeIndex(values)
+    else:
+        merged = pd.DatetimeIndex(values, tz=target_tz)
+    # The reference alignment path builds its union from a set and therefore
+    # intentionally carries no inferred frequency.  Clearing an inferred freq
+    # keeps downstream frame comparisons and resampling semantics stable.
+    merged.freq = None
+    return merged, target_tz
+
+
+def _alignment_epoch_ns(index: pd.DatetimeIndex, target_tz: object | None) -> np.ndarray:
+    """Return datetime labels as a consistent nanosecond integer array."""
+    current = pd.DatetimeIndex(index)
+    if target_tz is None:
+        if current.tz is not None:
+            current = current.tz_localize(None)
+    elif current.tz is None:
+        current = current.tz_localize(target_tz)
+    else:
+        current = current.tz_convert(target_tz)
+    if current.tz is not None:
+        current = current.tz_localize(None)
+    # ``DatetimeIndex.dtype`` is a numpy dtype for naive indexes, and that
+    # dtype does not expose ``unit`` on pandas 3.x.  The index itself does.
+    unit = getattr(current, "unit", "ns")
+    values = current.asi8
+    scale = {"s": 1_000_000_000, "ms": 1_000_000, "us": 1_000, "ns": 1}.get(unit)
+    if scale is None:
+        return current.astype("datetime64[ns]").asi8
+    if scale == 1:
+        return values
+    return values * np.int64(scale)
+
+
 # ─── Signal alignment (reused from daily_portfolio logic) ───
 
 
@@ -167,19 +225,14 @@ def _align(
         (dates, close_df, positions_df, returns_df)
     """
     # Build unified sorted date index from all symbols' trading calendars
-    indexes = [data_map[c].index for c in codes]
-    merged = np.unique(np.concatenate([index.asi8 for index in indexes]))
-    common_tz = indexes[0].tz
-    if all(index.tz == common_tz for index in indexes) and common_tz is not None:
-        dates = pd.DatetimeIndex(pd.to_datetime(merged, utc=True).tz_convert(common_tz))
-    else:
-        dates = pd.DatetimeIndex(merged)
+    indexes = [pd.DatetimeIndex(data_map[c].index) for c in codes]
+    dates, common_tz = _normalise_alignment_indexes(indexes)
 
     n_dates = len(dates)
     n_codes = len(codes)
 
     # Use int64 view for O(log n) searchsorted lookups
-    dates_i8 = dates.values.view("i8")
+    dates_i8 = _alignment_epoch_ns(dates, common_tz)
 
     # ffill with limit to avoid masking long suspensions (e.g. 3-week halt)
     # Cross-market needs larger limit (Chinese New Year can be 9-10 bars)
@@ -189,7 +242,10 @@ def _align(
     close_arr = np.full((n_dates, n_codes), np.nan)
     for j, c in enumerate(codes):
         series = data_map[c]["close"]
-        row_idx = np.searchsorted(dates_i8, series.index.values.view("i8"))
+        row_idx = np.searchsorted(
+            dates_i8,
+            _alignment_epoch_ns(pd.DatetimeIndex(series.index), common_tz),
+        )
         close_arr[row_idx, j] = series.values
 
     # Vectorized ffill with limit using pandas (C-optimized internals)
@@ -225,7 +281,10 @@ def _align(
         shifted_vals[0] = 0.0
         shifted_vals[1:] = sig_vals[:-1]
         # Place into unified grid via searchsorted
-        row_idx = np.searchsorted(dates_i8, own_idx.values.view("i8"))
+        row_idx = np.searchsorted(
+            dates_i8,
+            _alignment_epoch_ns(pd.DatetimeIndex(own_idx), common_tz),
+        )
         pos_arr[row_idx, j] = shifted_vals
 
     # Vectorized ffill with limit using pandas (C-optimized)

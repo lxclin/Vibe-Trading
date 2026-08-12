@@ -1116,7 +1116,14 @@ def _maybe_inject_fundamentals_for_factor_panel(
 
     panel = _build_price_panel(data_map)
     close = panel.get("close")
-    price_index = close.index if close is not None else pd.DatetimeIndex([])
+    # Preserve the caller's exact index object for a single-symbol panel.  In
+    # addition to avoiding an unnecessary copy, this matters to loaders that
+    # attach point-in-time fundamentals to the original calendar.  Multi-symbol
+    # panels still use the union calendar constructed by ``_build_price_panel``.
+    if len(data_map) == 1:
+        price_index = next(iter(data_map.values())).index
+    else:
+        price_index = close.index if close is not None else pd.DatetimeIndex([])
     symbols = list(data_map)
     _inject_fundamental_panel(
         panel,

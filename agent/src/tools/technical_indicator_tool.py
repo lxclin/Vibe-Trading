@@ -31,9 +31,23 @@ _EMA_PERIOD = 20
 _DEFAULT_LOOKBACK = 200
 _MAX_LOOKBACK = 500
 
+_INTERVAL_ALIASES = {
+    "1d": "1D",
+    "d": "1D",
+    "daily": "1D",
+    "1wk": "1W",
+    "1w": "1W",
+    "weekly": "1W",
+    "1mo": "1M",
+    "1mth": "1M",
+    "monthly": "1M",
+}
 
-_CLOSE_KEYS = ("close", "Close", "CLOSE", "adj_close")
-_DATE_KEYS = ("trade_date", "date", "datetime", "timestamp", "time")
+
+_CLOSE_KEYS = (
+    "close", "Close", "CLOSE", "adj_close", "Adj Close", "adjusted_close",
+)
+_DATE_KEYS = ("trade_date", "date", "datetime", "timestamp", "time", "index")
 
 
 def _extract_close_series(payload: Any) -> pd.Series | None:
@@ -206,7 +220,8 @@ class TechnicalIndicatorTool(BaseTool):
 
     def execute(self, **kwargs: Any) -> str:
         symbol = str(kwargs.get("symbol", "")).strip()
-        interval = str(kwargs.get("interval", "1d")).strip()
+        interval_raw = str(kwargs.get("interval", "1d")).strip()
+        interval = _INTERVAL_ALIASES.get(interval_raw.casefold(), interval_raw)
         lookback_raw = kwargs.get("lookback", _DEFAULT_LOOKBACK)
 
         if not symbol:
@@ -236,16 +251,16 @@ class TechnicalIndicatorTool(BaseTool):
             logger.debug("fetch_market_data failed for %s: %s", symbol, exc)
             return json.dumps({"ok": False, "error": f"Failed to fetch data: {exc}"})
 
-        df = data.get(symbol)
-        if df is None:
+        raw = data.get(symbol)
+        if raw is None:
             return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
-        if isinstance(df, pd.DataFrame) and df.empty:
+        if isinstance(raw, pd.DataFrame) and raw.empty:
             return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
-        if isinstance(df, list) and not df:
+        if isinstance(raw, list) and not raw:
             return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
-        if isinstance(df, dict) and not df:
+        if isinstance(raw, dict) and not raw:
             return json.dumps({"ok": False, "error": f"No data returned for {symbol}"})
-        if isinstance(df, dict) and df.get("truncated") is True:
+        if isinstance(raw, dict) and raw.get("truncated") is True:
             return json.dumps(
                 {
                     "ok": False,
@@ -253,7 +268,7 @@ class TechnicalIndicatorTool(BaseTool):
                 }
             )
 
-        close = _extract_close_series(df)
+        close = _extract_close_series(raw)
         if close is None or close.empty:
             return json.dumps({"ok": False, "error": "No close price column in data"})
         close = close.sort_index(kind="stable").tail(lookback)

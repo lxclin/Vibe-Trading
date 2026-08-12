@@ -747,7 +747,42 @@ class AgentLoop:
             )
         goal_store = None
         goal_turn_accounted = False
-        messages = context.build_messages(llm_user_message, history)
+        model_history = None
+        if history:
+            model_history = []
+            for history_message in history:
+                clean_message = dict(history_message)
+                clean_message.pop("grounding_identity", None)
+                model_history.append(clean_message)
+        messages = context.build_messages(llm_user_message, model_history)
+        messages.insert(
+            -1,
+            {
+                "role": "system",
+                "content": (
+                    "[GROUNDING OUTPUT CONTRACT] When the answer states any observed market "
+                    "price, name its exact canonical symbol, quote currency, and the actual "
+                    "tool data source. When it states a derived price or return, label it as "
+                    "derived and show the source inputs and formula. Do not claim that a report "
+                    "was delivered unless the report body is present in the same response."
+                ),
+            },
+        )
+        if self._grounding.inherited_symbols:
+            inherited = ", ".join(sorted(self._grounding.inherited_symbols))
+            messages.insert(
+                -1,
+                {
+                    "role": "system",
+                    "content": (
+                        "[GROUNDING CONTEXT] This is a referential follow-up. "
+                        f"The session's previously verified active instrument(s) are: {inherited}. "
+                        "You may reuse those exact canonical symbols. Resolve every additional "
+                        "peer or comparison instrument with search_symbol in a separate tool-call "
+                        "turn before requesting its market or fundamental data."
+                    ),
+                },
+            )
         react_trace: List[Dict[str, Any]] = []
 
         trace_dir = SESSIONS_DIR / session_id if session_id else run_dir
@@ -1176,6 +1211,39 @@ class AgentLoop:
                     response.tool_calls, context, messages, trace, react_trace, current_iter,
                 )
 
+                # Ambiguous identity is a conversational checkpoint, not a
+                # reason to spend the remaining tool budget or fall through to
+                # a generic refusal.  Ask the user to choose a venue/pair as
+                # soon as the resolver has produced competing candidates.  An
+                # explicit canonical symbol (including a crypto pair) keeps
+                # ``should_request_user_confirmation`` false and continues
+                # through the normal evidence-gated workflow.
+                if (
+                    self._grounding is not None
+                    and self._grounding.should_request_user_confirmation
+                ):
+                    final_content = self._grounding.clarification_prompt()
+                    trace.write_text_entry(
+                        {"type": "clarification", "iter": current_iter},
+                        field="content",
+                        value=final_content,
+                        offload_kind=f"clarification-{current_iter}",
+                    )
+                    trace.write_text_entry(
+                        {"type": "message", "iter": current_iter, "role": "assistant"},
+                        field="content",
+                        value=final_content,
+                        offload_kind=f"assistant-message-{current_iter}",
+                    )
+                    react_trace.append(
+                        {"type": "clarification", "content": final_content[:500]}
+                    )
+                    self._emit(
+                        "text_delta",
+                        {"delta": final_content, "iter": current_iter},
+                    )
+                    break
+
                 # Layer 3: compress after all tools have executed
                 if compact_requested:
                     logger.info("Manual compact triggered by model")
@@ -1258,6 +1326,9 @@ class AgentLoop:
             "react_trace": react_trace,
             "iterations": iteration,
             "max_iterations": self.max_iterations,
+            "grounding_identity": (
+                self._grounding.identity_summary() if self._grounding is not None else None
+            ),
         }
         configured_model = self._llm_runtime.configured_model
         result.update(

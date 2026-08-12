@@ -75,6 +75,23 @@ def test_llm_preflight_probe_reports_request_errors(monkeypatch) -> None:
     assert "Timeout: timed out" in result.message
 
 
+def test_llm_preflight_reports_missing_provider_adapter(monkeypatch) -> None:
+    """A reachable endpoint is not enough when the LangChain adapter is absent."""
+    _configure_llm_preflight(monkeypatch)
+    monkeypatch.setattr(
+        preflight,
+        "find_spec",
+        lambda name: None if name == "langchain_openai" else object(),
+    )
+
+    result = preflight._check_llm_provider()
+
+    assert result.status == "error"
+    assert result.critical is True
+    assert "langchain_openai" in result.message
+    assert "pip install langchain-openai" in result.impact
+
+
 def test_akshare_check_uses_spec_without_import(monkeypatch) -> None:
     """AKShare's package import is heavy; preflight should only check discovery."""
     monkeypatch.delitem(sys.modules, "akshare", raising=False)
@@ -94,6 +111,18 @@ def test_akshare_check_skips_when_missing(monkeypatch) -> None:
 
     assert result.status == "skipped"
     assert result.message == "package not installed"
+
+
+def test_runtime_dependency_preflight_reports_silent_tool_loss(monkeypatch) -> None:
+    """Missing import-only tool dependencies must be visible at startup."""
+    monkeypatch.setattr(preflight, "find_spec", lambda name: None)
+
+    result = preflight._check_runtime_dependencies()
+
+    assert result.status == "error"
+    assert "fastmcp" in result.message
+    assert "scipy" in result.message
+    assert "unavailable" in result.impact
 
 
 def test_content_filter_threshold_check(monkeypatch) -> None:

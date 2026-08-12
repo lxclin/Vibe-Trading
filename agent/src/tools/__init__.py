@@ -55,6 +55,15 @@ def _discover_subclasses() -> list[type[BaseTool]]:
     queue = deque(BaseTool.__subclasses__())
     while queue:
         cls = queue.popleft()
+        # ``BaseTool.__subclasses__()`` is process-global.  Test helpers and
+        # host applications may define their own temporary BaseTool classes;
+        # auto-discovering those classes makes a later registry build try to
+        # instantiate them (often with required constructor arguments) and can
+        # silently drop real tools.  Only classes owned by this package are
+        # plugin candidates; recurse through their subclasses as before.
+        if not cls.__module__.startswith("src.tools"):
+            queue.extend(cls.__subclasses__())
+            continue
         if cls.name:
             classes.append(cls)
         queue.extend(cls.__subclasses__())
