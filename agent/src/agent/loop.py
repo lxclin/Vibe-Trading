@@ -47,7 +47,7 @@ from src.providers.content_filter import (
 from src.config.accessor import get_env_config
 from src.config.paths import get_runs_dir, get_sessions_dir
 from src.tools.background_tools import get_background_manager
-from src.config.limits import TOOL_RESULT_LIMIT, truncate_tool_result
+from src.config.limits import TOOL_RESULT_LIMIT, truncate_tool_result  # noqa: F401 - public re-export
 from src.tools.redaction import redact_payload, redact_tool_result
 
 RUNS_DIR = get_runs_dir()
