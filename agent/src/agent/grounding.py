@@ -140,12 +140,46 @@ _GENERIC_PRICE_FIELD_ALIASES = {
 _CANONICAL_SYMBOL_RE = re.compile(
     r"(?<![A-Za-z0-9_])(?:"
     r"\d{3,6}\.(?:SH|SZ|BJ|SS|HK|KS|KQ)|"
-    r"[A-Z][A-Z0-9&.-]{0,19}\.(?:US|NS|BO|FX|TO|V)|"
+    r"[A-Z][A-Z0-9&.-]{0,19}\.(?:US|NS|BO|FX|TO|V|HK)|"
     r"[A-Z0-9]{2,15}(?:-|/)(?:USDT|USDC|USD|BTC|ETH)|"
     r"[A-Z0-9]{2,15}=[FX]"
     r")(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
+# A final answer may introduce a human-readable label beside a canonical
+# symbol and use that label in later prose (``00700.HK 腾讯`` ... ``腾讯守住
+# 444``).  Keep extraction deliberately narrow: only an adjacent CJK run is
+# eligible, and generic quote/report wording is trimmed or discarded.  The
+# resulting alias is scoped to this answer and still resolves to a symbol that
+# has observed evidence in the current run.
+_ADJACENT_CJK_ALIAS_LEFT_RE = re.compile(
+    r"([\u3400-\u9fff]{2,12})\s*[（(【\[]?\s*$"
+)
+_ADJACENT_CJK_ALIAS_RIGHT_RE = re.compile(
+    r"^\s*[）)】\]]?\s*([\u3400-\u9fff]{2,12})"
+)
+_GENERIC_CJK_ALIAS_PREFIX_RE = re.compile(
+    r"^(?:当前|今日|今天|最新|上述|本次|标的|代码|数据)"
+)
+_GENERIC_CJK_ALIAS_SUFFIX_RE = re.compile(
+    r"(?:当前价格|最新价格|收盘价格|开盘价格|现价|价格|收盘价|开盘价|"
+    r"行情|数据源|数据|走势|表现)$"
+)
+_GENERIC_CJK_ALIASES = {
+    "当前",
+    "今日",
+    "今天",
+    "最新",
+    "标的",
+    "代码",
+    "价格",
+    "现价",
+    "收盘",
+    "开盘",
+    "行情",
+    "数据",
+    "来源",
+}
 _BARE_NUMERIC_CODE_RE = re.compile(r"(?<![A-Za-z0-9_])\d{3,6}(?![A-Za-z0-9_])")
 _BARE_LISTED_CODE_RE = re.compile(r"(?<![A-Za-z0-9_])\d{5,6}(?![A-Za-z0-9_])")
 _ACTIONABLE_MARKET_RE = re.compile(
@@ -395,7 +429,7 @@ _PROSPECTIVE_LEVEL_RE = re.compile(
 # Full-width brackets and enumeration commas delimit prose clauses. ASCII
 # parentheses are deliberately not separators: an explicit derivation such as
 # "(8.5 - 7.9) / 2" must stay in one segment for the formula check.
-_CLAUSE_SEPARATOR_RE = re.compile(r"[,，;；。、\n（）【】]")
+_CLAUSE_SEPARATOR_RE = re.compile(r"(?:->|[,，;；。、\n（）【】→])")
 # The ASCII comma both separates clauses and groups thousands, and the clause
 # split ran first: "收盘价 ¥1,309.22" became a clause ending in "¥1", whose 1 was
 # compared against the observed 1300.01–1363.35 range and rejected as a
@@ -438,6 +472,12 @@ _TABLE_FIELD_ALIASES = {
     "closing price": "close",
     "收盘": "close",
     "收盘价": "close",
+    "price": "price",
+    "latest price": "price",
+    "current price": "price",
+    "价格": "price",
+    "现价": "price",
+    "最新价": "price",
 }
 _DATE_HEADERS = {"date", "datetime", "trade date", "timestamp", "日期", "交易日", "时间"}
 
@@ -1419,11 +1459,29 @@ class GroundingLedger:
                     f"(source: {source_label}; currency conversion: none)"
                 )
             joined = "；".join(facts) if is_zh else "; ".join(facts)
+            managing_position = bool(
+                _TRADE_MANAGEMENT_FOLLOWUP_RE.fullmatch(self.user_message or "")
+            )
             if is_zh:
+                if managing_position:
+                    return (
+                        f"当前已核验到的已观测 OHLC 范围是：{joined}。"
+                        "本轮具体持仓方案未通过最终数值校验，因此没有把可能混淆标的的"
+                        "卖出价交付给你；标的身份仍然有效，可以直接重试本次问题，系统会"
+                        "继续沿用该标的并重新生成止损、止盈和分批退出条件。"
+                    )
                 return (
                     f"当前已核验到的已观测 OHLC 范围是：{joined}。"
                     "现有证据不足以推导可靠的买入价；如需继续，我可以基于这组数据说明趋势、"
                     "风险和分批入场条件。"
+                )
+            if managing_position:
+                return (
+                    f"The verified observed OHLC range is: {joined}. "
+                    "The position plan did not pass the final numeric check, so I did not "
+                    "release an exit level that might belong to another instrument. The "
+                    "locked identity remains active; retry this question to regenerate "
+                    "stop-loss, take-profit, and staged-exit conditions."
                 )
             return (
                 f"The verified observed OHLC range is: {joined}. "
@@ -2567,14 +2625,20 @@ class GroundingLedger:
         a generic tool's fallback source is its own name, and requiring the
         answer to spell that out would reject correct prose.
         """
-        issues, table_lines = self._validate_price_tables(content)
         records = self._comparable_price_records()
+        symbol_aliases = self._symbol_aliases(content, records)
+        known_symbols = {record.symbol for record in records if record.symbol}
+        issues, table_lines = self._validate_price_tables(
+            content,
+            records=records,
+            aliases=symbol_aliases,
+        )
         # A report names its subject once and then writes prose about it. Both
         # narrower scopes are tried first; this is the last resort, and it only
         # resolves when the whole answer names exactly one evidence symbol.
-        document_symbol = self._symbol_for_claim(content, records)
+        document_symbol = self._symbol_for_claim(content, records, symbol_aliases)
         has_price_claim = any(
-            self._numbers_without_dates_or_percent(line)
+            self._numbers_without_dates_or_percent(line, known_symbols)
             for index, line in enumerate(content.splitlines())
             if index in table_lines
         )
@@ -2585,7 +2649,7 @@ class GroundingLedger:
             # "## 2️⃣ 现货价格" must not be compared with OHLC evidence.
             if re.match(r"^\s{0,3}#{1,6}\s", line):
                 continue
-            line_symbol = self._symbol_for_claim(line, records)
+            line_symbol = self._symbol_for_claim(line, records, symbol_aliases)
             for segment in _split_clauses(line):
                 if not _PRICE_CONTEXT_RE.search(segment):
                     continue
@@ -2602,12 +2666,12 @@ class GroundingLedger:
                     and not _UNSAFE_MARKET_CONCLUSION_RE.search(segment)
                 ):
                     continue
-                values = self._numbers_without_dates_or_percent(segment)
+                values = self._numbers_without_dates_or_percent(segment, known_symbols)
                 if not values:
                     continue
                 has_price_claim = True
                 symbol = (
-                    self._symbol_for_claim(segment, records)
+                    self._symbol_for_claim(segment, records, symbol_aliases)
                     or line_symbol
                     or document_symbol
                 )
@@ -2629,19 +2693,126 @@ class GroundingLedger:
             issues.extend(self._validate_price_provenance(content, market_records))
         return self._dedupe_issues(issues)
 
-    @staticmethod
     def _symbol_for_claim(
+        self,
         content: str,
         records: Sequence[EvidenceRecord],
+        aliases: Mapping[str, str] | None = None,
     ) -> str | None:
-        """Return one canonical evidence symbol explicitly named in a claim."""
+        """Return one evidence symbol explicitly named or locally labelled."""
         known = {record.symbol for record in records if record.symbol}
         matches = {
             _normalize_symbol(match.group(0))
             for match in _CANONICAL_SYMBOL_RE.finditer(content)
             if _normalize_symbol(match.group(0)) in known
         }
-        return next(iter(matches)) if len(matches) == 1 else None
+        # Models often shorten a canonical numeric listing after surfacing it
+        # once (``513330.SH`` -> ``513330``). Count that base as an explicit
+        # subject when it maps to exactly one evidence symbol. This also keeps
+        # a long comparison line containing both ``513330`` and ``HSTECH.HK``
+        # from assigning every later number to the index merely because only
+        # the latter retained its venue suffix.
+        numeric_tokens = _BARE_NUMERIC_CODE_RE.findall(content)
+        for token in numeric_tokens:
+            numeric_matches = {
+                candidate
+                for candidate in known
+                if candidate.split(".", 1)[0].isdigit()
+                and int(candidate.split(".", 1)[0]) == int(token)
+            }
+            if len(numeric_matches) == 1:
+                matches.update(numeric_matches)
+        if len(matches) == 1:
+            return next(iter(matches))
+        if matches:
+            return None
+
+        alias_matches: set[str] = set()
+        for alias, symbol in (aliases or {}).items():
+            if not alias or symbol not in known:
+                continue
+            if re.search(r"[\u3400-\u9fff]", alias):
+                present = alias in content
+            else:
+                present = bool(
+                    re.search(
+                        rf"(?<![A-Za-z0-9_]){re.escape(alias)}(?![A-Za-z0-9_])",
+                        content,
+                        re.IGNORECASE,
+                    )
+                )
+            if present:
+                alias_matches.add(symbol)
+        if len(alias_matches) == 1:
+            return next(iter(alias_matches))
+        return None
+
+    def _symbol_aliases(
+        self,
+        content: str,
+        records: Sequence[EvidenceRecord],
+    ) -> dict[str, str]:
+        """Build unambiguous run and answer-local aliases for evidence symbols.
+
+        Resolver queries and chosen candidate names provide audited aliases.
+        The answer itself may also define a label immediately beside one
+        canonical symbol, most commonly in a comparison table.  Ambiguous
+        aliases are discarded rather than guessed.
+        """
+        known = {record.symbol for record in records if record.symbol}
+        owners: dict[str, set[str]] = {}
+
+        def register(raw_alias: Any, symbol: str) -> None:
+            alias = str(raw_alias or "").strip().casefold()
+            if not alias or symbol not in known:
+                return
+            if _scan_symbols(alias) or _BARE_NUMERIC_CODE_RE.fullmatch(alias):
+                return
+            if len(alias) < 2 or len(alias) > 80:
+                return
+            owners.setdefault(alias, set()).add(symbol)
+
+        for identity in self._identities.values():
+            if identity.status != "locked" or not identity.symbol:
+                continue
+            register(identity.query, identity.symbol)
+            for candidate in identity.candidates:
+                if not isinstance(candidate, Mapping):
+                    continue
+                if _normalize_symbol(candidate.get("symbol")) != identity.symbol:
+                    continue
+                register(candidate.get("name"), identity.symbol)
+
+        for line in content.splitlines():
+            canonical = [
+                (match, _normalize_symbol(match.group(0)))
+                for match in _CANONICAL_SYMBOL_RE.finditer(line)
+                if _normalize_symbol(match.group(0)) in known
+            ]
+            # A line containing several instruments cannot safely define which
+            # nearby prose label belongs to which one.
+            if len(canonical) != 1:
+                continue
+            match, symbol = canonical[0]
+            windows = (
+                _ADJACENT_CJK_ALIAS_LEFT_RE.search(line[max(0, match.start() - 20) : match.start()]),
+                _ADJACENT_CJK_ALIAS_RIGHT_RE.match(line[match.end() : match.end() + 20]),
+            )
+            for alias_match in windows:
+                if alias_match is None:
+                    continue
+                alias = alias_match.group(1)
+                alias = _GENERIC_CJK_ALIAS_PREFIX_RE.sub("", alias)
+                alias = _GENERIC_CJK_ALIAS_SUFFIX_RE.sub("", alias)
+                if len(alias) < 2 or alias in _GENERIC_CJK_ALIASES:
+                    continue
+                register(alias, symbol)
+
+        return {
+            alias: next(iter(symbols))
+            for alias, symbols in owners.items()
+            if len(symbols) == 1
+        }
 
     def _validate_price_provenance(
         self,
@@ -2742,13 +2913,17 @@ class GroundingLedger:
     def _validate_price_tables(
         self,
         content: str,
+        *,
+        records: list[EvidenceRecord] | None = None,
+        aliases: Mapping[str, str] | None = None,
     ) -> tuple[list[dict[str, Any]], set[int]]:
         """Validate field/date-specific claims in Markdown OHLC tables."""
         lines = content.splitlines()
         issues: list[dict[str, Any]] = []
         consumed: set[int] = set()
         index = 0
-        records = self._comparable_price_records()
+        records = records if records is not None else self._comparable_price_records()
+        aliases = aliases if aliases is not None else self._symbol_aliases(content, records)
         while index + 1 < len(lines):
             header = self._table_cells(lines[index])
             separator = self._table_cells(lines[index + 1])
@@ -2782,9 +2957,16 @@ class GroundingLedger:
                     break
                 consumed.add(row_index)
                 date_value = row[date_column].strip() if date_column is not None else None
-                symbol = _normalize_symbol(row[symbol_column]) if symbol_column is not None else None
+                symbol = (
+                    self._symbol_for_claim(row[symbol_column], records, aliases)
+                    if symbol_column is not None
+                    else None
+                )
                 for position, field_name in field_columns.items():
-                    values = self._numbers_without_dates_or_percent(row[position])
+                    values = self._numbers_without_dates_or_percent(
+                        row[position],
+                        {record.symbol for record in records if record.symbol},
+                    )
                     if len(values) != 1:
                         continue
                     issue = self._compare_price_claim(
@@ -2827,12 +3009,6 @@ class GroundingLedger:
         candidates = records
         if symbol:
             candidates = [record for record in candidates if record.symbol == symbol]
-        elif self._primary_symbols:
-            primary_candidates = [
-                record for record in candidates if record.symbol in self._primary_symbols
-            ]
-            if len({record.symbol for record in primary_candidates if record.symbol}) == 1:
-                candidates = primary_candidates
         symbols = sorted({record.symbol for record in candidates if record.symbol})
         if not symbol and len(symbols) == 1:
             symbol = symbols[0]
@@ -2918,7 +3094,10 @@ class GroundingLedger:
         return records
 
     @staticmethod
-    def _numbers_without_dates_or_percent(text: str) -> list[float]:
+    def _numbers_without_dates_or_percent(
+        text: str,
+        known_symbols: Iterable[str] = (),
+    ) -> list[float]:
         """Extract the numbers in a claim that could plausibly be prices.
 
         Digits that belong to a canonical symbol, a calendar date, an aggregate
@@ -2937,6 +3116,18 @@ class GroundingLedger:
         """
         masked = _MD_LIST_ITEM_RE.sub(" ", text)
         masked = _CANONICAL_SYMBOL_RE.sub(" ", masked)
+        numeric_roots = {
+            int(root)
+            for symbol in known_symbols
+            if (root := str(symbol or "").split(".", 1)[0]).isdigit()
+        }
+        if numeric_roots:
+            chars = list(masked)
+            for match in _BARE_NUMERIC_CODE_RE.finditer(masked):
+                if int(match.group(0)) not in numeric_roots:
+                    continue
+                chars[match.start() : match.end()] = " " * (match.end() - match.start())
+            masked = "".join(chars)
         masked = _LOCALIZED_DATE_RE.sub(" ", masked)
         masked = _DATE_RE.sub(" ", masked)
         masked = _SHORT_DATE_RE.sub(" ", masked)

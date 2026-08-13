@@ -1686,6 +1686,36 @@ def test_safe_fallback_reports_primary_not_comparison_peer(tmp_path: Path) -> No
     assert "00700.HK" not in fallback
 
 
+def test_safe_fallback_for_position_followup_does_not_ask_for_buy_price(
+    tmp_path: Path,
+) -> None:
+    """A rejected exit-management draft gets an intent-specific fallback."""
+    ledger = GroundingLedger(
+        run_dir=tmp_path,
+        user_message="我刚刚0.393买入了1000元，后面该怎么做，什么时候卖出？",
+        history=[{"role": "user", "content": "513330.SH是否值得买入"}],
+    )
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": ["513330.SH"], "source": "auto"},
+        result=json.dumps(
+            {
+                "513330.SH": [{"date": "2026-08-13", "close": 0.393}],
+                "_provenance": {
+                    "513330.SH": {"source": "tencent", "currency_conversion": "none"}
+                },
+            }
+        ),
+        call_id="prices",
+        success=True,
+    )
+
+    fallback = ledger.safe_fallback()
+
+    assert "买入价" not in fallback
+    assert "止损、止盈和分批退出条件" in fallback
+
+
 def test_unlabelled_price_claim_defaults_to_single_primary_not_peer(tmp_path: Path) -> None:
     """Peer evidence must not make a primary price sentence ambiguous."""
     ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
@@ -1711,6 +1741,179 @@ def test_unlabelled_price_claim_defaults_to_single_primary_not_peer(tmp_path: Pa
         "513330.SH 当前价格为 0.396 CNY（source: tencent）。"
     )
     assert result.valid is True
+
+
+def test_answer_local_peer_alias_keeps_price_attached_to_that_peer(
+    tmp_path: Path,
+) -> None:
+    """A label introduced beside a canonical peer survives later prose.
+
+    Real follow-up reports commonly define ``00700.HK 腾讯`` in a snapshot and
+    later write ``腾讯是否守住 444``.  The latter must stay attached to Tencent,
+    not default to the primary ETF whose prices are below one yuan.
+    """
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
+    payload = json.dumps(
+        {
+            "513330.SH": [{"date": "2026-08-13", "close": 0.393}],
+            "00700.HK": [{"date": "2026-08-13", "close": 444.0}],
+            "_provenance": {
+                "513330.SH": {"source": "tencent", "currency_conversion": "none"},
+                "00700.HK": {"source": "yahoo", "currency_conversion": "none"},
+            },
+        }
+    )
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": ["513330.SH", "00700.HK"], "source": "auto"},
+        result=payload,
+        call_id="prices",
+        success=True,
+    )
+
+    result = ledger.validate_final_answer(
+        "513330.SH 现价 0.393 CNY（source: tencent）。\n"
+        "00700.HK 腾讯现价 444 HKD（source: yahoo）。\n"
+        "检查点：今日收盘腾讯是否守住 444 HKD。"
+    )
+
+    assert result.valid is True, result.issues
+
+
+def test_labelled_peer_in_latest_price_table_uses_its_own_evidence(
+    tmp_path: Path,
+) -> None:
+    """Comparison-table aliases and ``最新价`` are validated per instrument."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": ["513330.SH", "00700.HK"], "source": "auto"},
+        result=json.dumps(
+            {
+                "513330.SH": [{"date": "2026-08-13", "price": 0.393}],
+                "00700.HK": [{"date": "2026-08-13", "price": 444.0}],
+                "_provenance": {
+                    "513330.SH": {"source": "tencent", "currency_conversion": "none"},
+                    "00700.HK": {"source": "yahoo", "currency_conversion": "none"},
+                },
+            }
+        ),
+        call_id="prices",
+        success=True,
+    )
+
+    result = ledger.validate_final_answer(
+        "| 标的 | 最新价 |\n"
+        "|---|---:|\n"
+        "| 513330.SH 恒生互联网ETF | 0.393 CNY |\n"
+        "| 00700.HK 腾讯 | 444 HKD |\n\n"
+        "数据源：tencent、yahoo。"
+    )
+
+    assert result.valid is True, result.issues
+
+
+def test_unlabelled_multi_instrument_levels_match_observed_union(
+    tmp_path: Path,
+) -> None:
+    """Long comparison prose must not force every unlabelled level onto primary."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": ["513330.SH", "00700.HK", "HSTECH.HK"], "source": "auto"},
+        result=json.dumps(
+            {
+                "513330.SH": [
+                    {"date": "2026-08-13", "low": 0.384, "close": 0.393}
+                ],
+                "00700.HK": [
+                    {"date": "2026-08-13", "low": 444.0, "close": 456.2}
+                ],
+                "HSTECH.HK": [
+                    {"date": "2026-08-13", "low": 4750.0, "close": 4791.0}
+                ],
+                "_provenance": {
+                    "513330.SH": {"source": "tencent", "currency_conversion": "none"},
+                    "00700.HK": {"source": "tencent", "currency_conversion": "none"},
+                    "HSTECH.HK": {"source": "yfinance", "currency_conversion": "none"},
+                },
+            }
+        ),
+        call_id="prices",
+        success=True,
+    )
+
+    result = ledger.validate_final_answer(
+        "513330.SH、00700.HK、HSTECH.HK 均已核验（sources: tencent, yfinance；"
+        "currencies: CNY, HKD）。\n"
+        "触发：513330 收盘低于 0.390，且腾讯低于 440、"
+        "HSTECH.HK 收盘低于 4,750 → 下一支撑看 0.384。\n"
+        "若腾讯企稳（收盘收复 456.2）则继续观察。"
+    )
+
+    assert result.valid is True, result.issues
+
+
+def test_explicit_symbol_still_rejects_another_instruments_observed_price(
+    tmp_path: Path,
+) -> None:
+    """Union fallback cannot excuse a value explicitly attached to the wrong code."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": ["513330.SH", "00700.HK"], "source": "auto"},
+        result=json.dumps(
+            {
+                "513330.SH": [{"date": "2026-08-13", "close": 0.393}],
+                "00700.HK": [{"date": "2026-08-13", "close": 456.2}],
+                "_provenance": {
+                    "513330.SH": {"source": "tencent", "currency_conversion": "none"},
+                    "00700.HK": {"source": "yahoo", "currency_conversion": "none"},
+                },
+            }
+        ),
+        call_id="prices",
+        success=True,
+    )
+
+    result = ledger.validate_final_answer(
+        "513330.SH 收盘价 456.2 CNY（sources: tencent, yahoo）。"
+    )
+
+    assert result.valid is False
+    assert "numeric_claim_conflict" in {issue["code"] for issue in result.issues}
+
+
+def test_unlabelled_evidence_price_does_not_require_repeating_peer_code(
+    tmp_path: Path,
+) -> None:
+    """An exact observed peer quote may be restated without its code every time."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
+    payload = json.dumps(
+        {
+            "513330.SH": [{"date": "2026-08-13", "close": 0.393}],
+            "00700.HK": [{"date": "2026-08-13", "close": 444.0}],
+            "_provenance": {
+                "513330.SH": {"source": "tencent", "currency_conversion": "none"},
+                "00700.HK": {"source": "yahoo", "currency_conversion": "none"},
+            },
+        }
+    )
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": ["513330.SH", "00700.HK"], "source": "auto"},
+        result=payload,
+        call_id="prices",
+        success=True,
+    )
+
+    result = ledger.validate_final_answer(
+        "513330.SH 现价 0.393 CNY，00700.HK 现价 444 HKD"
+        "（sources: tencent, yahoo）。\n"
+        "检查点：今日收盘腾讯是否守住 444 HKD。"
+    )
+
+    assert result.valid is True, result.issues
 
 
 def test_safe_fallback_inherits_language_from_conversation_history(tmp_path: Path) -> None:
