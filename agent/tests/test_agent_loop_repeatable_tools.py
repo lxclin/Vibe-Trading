@@ -13,8 +13,14 @@ from src.agent.loop import AgentLoop
 from src.agent.tools import ToolRegistry
 from src.agent.trace import TraceWriter
 from src.tools.get_fundamentals_tool import GetFundamentalsTool
+from src.tools.block_trades_tool import BlockTradesTool
+from src.tools.financial_statements_tool import FinancialStatementsTool
+from src.tools.fund_flow_tool import FundFlowTool
+from src.tools.margin_trading_tool import MarginTradingTool
 from src.tools.market_data_tool import MarketDataTool
 from src.tools.market_screener_tool import MarketScreenerTool
+from src.tools.stock_news_tool import StockNewsTool
+from src.tools.stock_profile_tool import StockProfileTool
 from src.tools.symbol_search_tool import SymbolSearchTool
 
 
@@ -58,6 +64,36 @@ from src.tools.symbol_search_tool import SymbolSearchTool
             SymbolSearchTool,
             {"query": "Apple", "limit": 5},
             {"query": "Microsoft", "limit": 5},
+        ),
+        (
+            FinancialStatementsTool,
+            {"code": "AAPL.US", "statement": "income"},
+            {"code": "MSFT.US", "statement": "balance"},
+        ),
+        (
+            FundFlowTool,
+            {"codes": ["600519.SH"], "period": "daily", "days": 10},
+            {"codes": ["000001.SZ"], "period": "daily", "days": 20},
+        ),
+        (
+            StockProfileTool,
+            {"ticker": "AAPL.US", "sections": ["summary"]},
+            {"ticker": "MSFT.US", "sections": ["officers"]},
+        ),
+        (
+            StockNewsTool,
+            {"code": "AAPL.US", "scope": "stock", "limit": 5},
+            {"code": "MSFT.US", "scope": "stock", "limit": 10},
+        ),
+        (
+            MarginTradingTool,
+            {"code": "600519.SH", "days": 10},
+            {"code": "000001.SZ", "days": 20},
+        ),
+        (
+            BlockTradesTool,
+            {"code": "600519.SH", "days": 10},
+            {"code": "000001.SZ", "days": 20},
         ),
     ],
 )

@@ -129,6 +129,7 @@ class MarginTradingTool(BaseTool):
     """Fetch daily A-share margin-financing / short-selling balances."""
 
     name = "get_margin_trading"
+    repeatable = True
     description = (
         "Fetch an A-share stock's daily margin-trading (融资融券) balances from "
         "Eastmoney's public datacenter: outstanding financing balance, financing "

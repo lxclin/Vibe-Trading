@@ -2030,6 +2030,7 @@ def test_price_validation_ignores_symbol_date_and_quantity_digits(tmp_path: Path
         "000543.SZ 买入价 8.20 CNY（100 股成本 820 CNY；source: tencent）",
         "000543.SZ 收盘价 8.20 CNY，套保合约价值 219 亿元（source: tencent）",
         "000543.SZ 建议持有 1–4 周，买入价 8.20 CNY（source: tencent）",
+        "每天 15:05 收盘后运行；000543.SZ 收盘价 8.20 CNY（source: tencent）",
     ):
         result = ledger.validate_final_answer(draft)
         assert result.valid is True, (draft, result.issues)

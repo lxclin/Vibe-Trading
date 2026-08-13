@@ -234,6 +234,7 @@ class StockProfileTool(BaseTool):
     """Company profile: key stats, analyst estimates, and ownership."""
 
     name = "get_stock_profile"
+    repeatable = True
     description = (
         "Fetch a read-only company profile for a US or Hong Kong listing from "
         "Yahoo Finance: valuation key statistics, analyst price targets and "

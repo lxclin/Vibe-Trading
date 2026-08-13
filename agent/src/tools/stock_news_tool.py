@@ -246,6 +246,7 @@ class StockNewsTool(BaseTool):
     """Read-only per-stock and global financial news headlines."""
 
     name = "get_stock_news"
+    repeatable = True
     description = (
         "Fetch recent financial news headlines, read-only and no auth. Markets: "
         "China A-share (SH/SZ/BJ) returns Eastmoney news ARTICLES "

@@ -293,6 +293,12 @@ _COMPACT_SLASH_DATE_RE = re.compile(
     r"(?<![\dA-Za-z])(?:0?[1-9]|1[0-2])\s*/\s*"
     r"(?:0?[1-9]|[12]\d|3[01])(?![\dA-Za-z])"
 )
+# Clock times next to market-session words are schedule metadata, not prices.
+# Without masking, "每天 15:05 收盘后运行" contributes 15 and 5 to the OHLC
+# validator merely because the same clause contains "收盘".
+_CLOCK_TIME_RE = re.compile(
+    r"(?<!\d)(?:[01]?\d|2[0-3])\s*[:：]\s*[0-5]\d(?:\s*[:：]\s*[0-5]\d)?(?!\d)"
+)
 # An aggregate amount is not a quoted price. "100 股成本 820 CNY" states a
 # position cost; comparing 820 against a per-share OHLC range is a category
 # error. The tradeoff is that a per-share figure written only as "成本 8.20"
@@ -2937,6 +2943,7 @@ class GroundingLedger:
         masked = _PERCENT_RANGE_RE.sub(" ", masked)
         masked = _COMPACT_MARKET_DATE_RE.sub(" ", masked)
         masked = _COMPACT_SLASH_DATE_RE.sub(" ", masked)
+        masked = _CLOCK_TIME_RE.sub(" ", masked)
         masked = _AGGREGATE_AMOUNT_RE.sub(" ", masked)
         masked = _LABELLED_SCORE_RE.sub(" ", masked)
         masked = _INDICATOR_VALUE_RE.sub(" ", masked)

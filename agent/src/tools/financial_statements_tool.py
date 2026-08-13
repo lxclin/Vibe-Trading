@@ -590,6 +590,7 @@ class FinancialStatementsTool(BaseTool):
     """Fetch a stock's three financial statements or key per-period indicators."""
 
     name = "get_financial_statements"
+    repeatable = True
     description = (
         "Fetch a single stock's financial statements: balance sheet, income "
         "statement, cash-flow statement, or key per-period indicators (margins, "

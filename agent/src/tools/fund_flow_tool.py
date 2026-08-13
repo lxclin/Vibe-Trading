@@ -165,6 +165,7 @@ class FundFlowTool(BaseTool):
     """Fetch order-bucket net capital inflow (main/large/medium/small) for stocks."""
 
     name = "get_fund_flow"
+    repeatable = True
     description = (
         "PER-STOCK order-level net inflow for a GIVEN symbol: for each requested "
         "ticker, the main / super-large / large / medium / small-order net inflow "

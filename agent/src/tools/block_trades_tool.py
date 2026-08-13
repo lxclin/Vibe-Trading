@@ -175,6 +175,7 @@ class BlockTradesTool(BaseTool):
     """Recent A-share block trades (大宗交易): price, premium, volume, seats."""
 
     name = "get_block_trades"
+    repeatable = True
     description = (
         "Fetch recent A-share block trades (大宗交易) for one symbol from the "
         "Eastmoney datacenter: per-deal price, volume, amount, the "
