@@ -1426,6 +1426,61 @@ def test_bare_hk_code_never_locks_same_number_taiwan_product(tmp_path: Path) -> 
     assert ledger.identity_status == "ambiguous"
 
 
+def test_named_hk_code_never_locks_same_number_taiwan_product(tmp_path: Path) -> None:
+    """Venue filtering also applies when a company name prefixes a bare code."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="腾讯控股 00700目前值得买吗")
+    payload = _resolver_payload(
+        query="腾讯控股 00700",
+        candidates=[{"symbol": "00700.TW", "name": "Unrelated Taiwan ETF"}],
+    )
+    auth = ledger.authorize_tool_call(
+        "search_symbol",
+        {"query": "腾讯控股 00700"},
+        batch_authorized_symbols=set(),
+        call_id="resolver",
+    )
+    assert auth.allowed
+    ledger.ingest_tool_result(
+        tool_name="search_symbol",
+        arguments={"query": "腾讯控股 00700"},
+        result=payload,
+        call_id="resolver",
+        success=True,
+    )
+
+    assert "00700.TW" not in ledger.authorized_symbols
+    assert ledger.identity_status != "locked"
+
+
+def test_named_hk_code_prefers_matching_hong_kong_candidate(tmp_path: Path) -> None:
+    """A labelled five-digit code filters both venue and numeric root."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="腾讯控股 00700目前值得买吗")
+    payload = _resolver_payload(
+        query="腾讯控股 00700",
+        candidates=[
+            {"symbol": "00700.TW", "name": "Unrelated Taiwan ETF"},
+            {"symbol": "00700.HK", "name": "Tencent Holdings"},
+            {"symbol": "03032.HK", "name": "Unrelated Hong Kong ETF"},
+        ],
+    )
+    ledger.authorize_tool_call(
+        "search_symbol",
+        {"query": "腾讯控股 00700"},
+        batch_authorized_symbols=set(),
+        call_id="resolver",
+    )
+    ledger.ingest_tool_result(
+        tool_name="search_symbol",
+        arguments={"query": "腾讯控股 00700"},
+        result=payload,
+        call_id="resolver",
+        success=True,
+    )
+
+    assert ledger.authorized_symbols == {"00700.HK"}
+    assert ledger.identity_status == "locked"
+
+
 def test_final_numeric_gate_rejects_known_trace_contradiction(tmp_path: Path) -> None:
     """Known 1.11-1.18 evidence cannot become 0.88-0.91 in the answer."""
     ledger = GroundingLedger(

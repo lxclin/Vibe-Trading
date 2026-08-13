@@ -2070,13 +2070,21 @@ class GroundingLedger:
         Explicitly qualified queries are unaffected.
         """
         compact = str(query or "").strip()
-        if not _BARE_LISTED_CODE_RE.fullmatch(compact):
+        if _CANONICAL_SYMBOL_RE.search(compact):
             return candidates
-        allowed = (".HK",) if len(compact) == 5 else (".SH", ".SS", ".SZ", ".BJ")
+        codes = set(_BARE_LISTED_CODE_RE.findall(compact))
+        if len(codes) != 1:
+            return candidates
+        code = next(iter(codes))
+        allowed = (".HK",) if len(code) == 5 else (".SH", ".SS", ".SZ", ".BJ")
         return [
             candidate
             for candidate in candidates
-            if _normalize_symbol(candidate.get("symbol")).endswith(allowed)
+            if (
+                (symbol := _normalize_symbol(candidate.get("symbol"))).endswith(allowed)
+                and symbol.split(".", 1)[0].isdigit()
+                and int(symbol.split(".", 1)[0]) == int(code)
+            )
         ]
 
     def _supersede_shortlists(self, symbol: str) -> None:
