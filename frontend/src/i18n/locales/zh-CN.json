@@ -443,6 +443,12 @@
   },
   "agent": {
     "reasoningStrength": "推理强度",
+    "modelSwitchLabel": "切换聊天模型",
+    "modelSwitchTo": "切换到 {{provider}}（下一条消息生效）",
+    "modelSwitchBusyHint": "当前回复完成后才能切换模型",
+    "modelSwitched": "已切换到 {{provider}}，下一条消息开始生效",
+    "modelSwitchFailed": "模型切换失败：{{message}}",
+    "modelSwitchUnavailable": "当前配置不支持该模型",
     "unknownProvider": "未知提供商",
     "unknownModel": "未知模型",
     "connectionLostReconnect": "连接已断开，正在重连…",

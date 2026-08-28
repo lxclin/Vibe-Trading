@@ -448,6 +448,12 @@
   },
   "agent": {
     "reasoningStrength": "Reasoning Effort",
+    "modelSwitchLabel": "Switch chat model",
+    "modelSwitchTo": "Switch to {{provider}} (applies to the next message)",
+    "modelSwitchBusyHint": "Wait for the current response before switching models",
+    "modelSwitched": "Switched to {{provider}}; the next message will use it",
+    "modelSwitchFailed": "Model switch failed: {{message}}",
+    "modelSwitchUnavailable": "This model is not available in the current configuration",
     "unknownProvider": "Unknown provider",
     "unknownModel": "Unknown model",
     "connectionLostReconnect": "Connection lost, reconnecting…",

@@ -443,6 +443,12 @@
   },
   "agent": {
     "reasoningStrength": "جهد الاستدلال",
+    "modelSwitchLabel": "تبديل نموذج الدردشة",
+    "modelSwitchTo": "التبديل إلى {{provider}} (يُطبق على الرسالة التالية)",
+    "modelSwitchBusyHint": "انتظر اكتمال الرد الحالي قبل تبديل النموذج",
+    "modelSwitched": "تم التبديل إلى {{provider}}؛ سيُستخدم مع الرسالة التالية",
+    "modelSwitchFailed": "فشل تبديل النموذج: {{message}}",
+    "modelSwitchUnavailable": "هذا النموذج غير متاح في الإعداد الحالي",
     "unknownProvider": "مزوّد غير معروف",
     "unknownModel": "نموذج غير معروف",
     "connectionLostReconnect": "فُقد الاتصال، جارٍ إعادة الاتصال…",

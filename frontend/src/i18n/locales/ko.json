@@ -443,6 +443,12 @@
   },
   "agent": {
     "reasoningStrength": "추론 강도",
+    "modelSwitchLabel": "채팅 모델 전환",
+    "modelSwitchTo": "{{provider}}로 전환 (다음 메시지부터 적용)",
+    "modelSwitchBusyHint": "현재 응답이 끝난 후 모델을 전환할 수 있습니다",
+    "modelSwitched": "{{provider}}로 전환했습니다. 다음 메시지부터 적용됩니다",
+    "modelSwitchFailed": "모델 전환 실패: {{message}}",
+    "modelSwitchUnavailable": "현재 설정에서는 이 모델을 사용할 수 없습니다",
     "unknownProvider": "알 수 없는 제공자",
     "unknownModel": "알 수 없는 모델",
     "connectionLostReconnect": "연결이 끊겼습니다. 재연결 중…",

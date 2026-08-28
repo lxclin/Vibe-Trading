@@ -250,6 +250,7 @@ export function Agent() {
   const [visibleRowCount, setVisibleRowCount] = useState(TIMELINE_WINDOW_SIZE);
   const visibleRowsSessionRef = useRef<string | null>(null);
   const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null);
+  const [modelSwitching, setModelSwitching] = useState(false);
   const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeIdentity>({});
 
   const messages = useAgentStore(s => s.messages);
@@ -1232,6 +1233,45 @@ export function Agent() {
     }).catch(() => {});
   }, []);
 
+  const switchChatProvider = useCallback(async (
+    providerName: "deepseek" | "openai-codex",
+  ) => {
+    if (!llmSettings || modelSwitching || status === "streaming") return;
+    const provider = llmSettings.providers.find((item) => item.name === providerName);
+    if (!provider) {
+      toast.error(t("agent.modelSwitchUnavailable"));
+      return;
+    }
+    const modelName = providerName === "deepseek"
+      ? "deepseek-v4-flash"
+      : "openai-codex/gpt-5.6-sol";
+    setModelSwitching(true);
+    try {
+      const updated = await api.updateLLMSettings({
+        provider: providerName,
+        model_name: modelName,
+        base_url: provider.default_base_url,
+        temperature: llmSettings.temperature,
+        timeout_seconds: llmSettings.timeout_seconds,
+        max_retries: llmSettings.max_retries,
+        reasoning_effort: providerName === "openai-codex"
+          ? "medium"
+          : llmSettings.reasoning_effort,
+      });
+      sseTimeoutMsRef.current = updated.sse_timeout_seconds * 1000;
+      setLlmSettings(updated);
+      toast.success(t("agent.modelSwitched", {
+        provider: providerName === "deepseek" ? "DeepSeek" : "ChatGPT",
+      }));
+    } catch (error) {
+      toast.error(t("agent.modelSwitchFailed", {
+        message: error instanceof Error ? error.message : t("settings.unknownError"),
+      }));
+    } finally {
+      setModelSwitching(false);
+    }
+  }, [llmSettings, modelSwitching, status, t]);
+
   /* Safety timeout: if streaming but no SSE event for sseTimeoutMsRef.current ms, reset to idle */
   useEffect(() => {
     if (status !== "streaming") return;
@@ -1622,6 +1662,9 @@ export function Agent() {
         runtimeProvider={visibleRuntimeIdentity.provider}
         runtimeModel={visibleRuntimeIdentity.model}
         runtimeReasoningEffort={visibleRuntimeIdentity.reasoningEffort}
+        switching={modelSwitching}
+        switchDisabled={status === "streaming"}
+        onProviderSwitch={switchChatProvider}
       />
       <div
         ref={listRef}

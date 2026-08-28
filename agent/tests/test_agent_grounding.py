@@ -676,6 +676,109 @@ def test_elliptical_followup_prefers_structured_locked_identity(
     assert ledger.inherited_symbols == {"600547.SH"}
 
 
+def test_strategy_horizon_followup_inherits_structured_locked_identity(
+    tmp_path: Path,
+) -> None:
+    """Natural strategy wording keeps the instrument from the prior turn."""
+    ledger = GroundingLedger(
+        run_dir=tmp_path,
+        user_message="按中线给我方案",
+        history=[
+            {"role": "user", "content": "159530这只股票怎么看"},
+            {
+                "role": "assistant",
+                "content": "159530.SZ 已完成分析。",
+                "grounding_identity": {
+                    "status": "locked",
+                    "authorized_symbols": ["159530.SZ"],
+                    "primary_symbols": ["159530.SZ"],
+                    "records": [
+                        {
+                            "status": "locked",
+                            "symbol": "159530.SZ",
+                            "venue": "shenzhen",
+                            "instrument_type": "etf",
+                            "currency": "CNY",
+                        }
+                    ],
+                },
+            },
+        ],
+    )
+
+    assert ledger.identity_status == "locked"
+    assert ledger.authorized_symbols == {"159530.SZ"}
+    assert ledger.inherited_symbols == {"159530.SZ"}
+    authorization = ledger.authorize_tool_call(
+        "get_market_data",
+        {"codes": ["159530.SZ"]},
+        batch_authorized_symbols=ledger.authorized_symbols,
+        batch_identity_status=ledger.identity_status,
+        call_id="strategy-followup-price",
+    )
+    assert authorization.allowed is True
+
+
+def test_strategy_followup_recovers_through_failed_retries(
+    tmp_path: Path,
+) -> None:
+    """Failed lookups in a referential chain cannot hide an older audited lock."""
+    locked = {
+        "status": "locked",
+        "authorized_symbols": ["159530.SZ"],
+        "primary_symbols": ["159530.SZ"],
+        "records": [{"status": "locked", "symbol": "159530.SZ"}],
+    }
+    failed = {
+        "status": "invalidated",
+        "authorized_symbols": [],
+        "primary_symbols": [],
+        "records": [{"query": "159530", "status": "invalidated"}],
+    }
+    ledger = GroundingLedger(
+        run_dir=tmp_path,
+        user_message="按中线给我方案",
+        history=[
+            {"role": "user", "content": "159530这只股票怎么看"},
+            {"role": "assistant", "content": "完整分析", "grounding_identity": locked},
+            {"role": "user", "content": "成本1.5，后面怎么操作"},
+            {"role": "assistant", "content": "请确认标的", "grounding_identity": failed},
+            {"role": "user", "content": "159530按中线给我方案"},
+            {"role": "assistant", "content": "请确认标的", "grounding_identity": failed},
+        ],
+    )
+
+    assert ledger.identity_status == "locked"
+    assert ledger.authorized_symbols == {"159530.SZ"}
+    assert ledger.inherited_symbols == {"159530.SZ"}
+
+
+def test_strategy_wording_with_new_subject_does_not_inherit_stale_identity(
+    tmp_path: Path,
+) -> None:
+    """A newly named subject is not mistaken for an elliptical strategy follow-up."""
+    ledger = GroundingLedger(
+        run_dir=tmp_path,
+        user_message="AAPL按中线给我方案",
+        history=[
+            {"role": "user", "content": "分析159530.SZ"},
+            {
+                "role": "assistant",
+                "content": "已完成。",
+                "grounding_identity": {
+                    "status": "locked",
+                    "authorized_symbols": ["159530.SZ"],
+                    "primary_symbols": ["159530.SZ"],
+                    "records": [{"status": "locked", "symbol": "159530.SZ"}],
+                },
+            },
+        ],
+    )
+
+    assert ledger.inherited_symbols == set()
+    assert "159530.SZ" not in ledger.authorized_symbols
+
+
 def test_trade_management_followup_inherits_active_identity(
     tmp_path: Path,
 ) -> None:

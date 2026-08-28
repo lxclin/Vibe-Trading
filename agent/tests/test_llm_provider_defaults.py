@@ -18,7 +18,7 @@ EXPECTED_PROVIDER_DEFAULTS = {
     "requesty": "openai/gpt-4o-mini",
     "openai": "gpt-5.5",
     "anthropic": "claude-sonnet-4-6",
-    "openai-codex": "openai-codex/gpt-5.4",
+    "openai-codex": "openai-codex/gpt-5.6-sol",
     "deepseek": "deepseek-v4-pro",
     "siliconflow-cn": "deepseek-ai/DeepSeek-V3.1-Terminus",
     "siliconflow-global": "deepseek-ai/DeepSeek-V3.1-Terminus",
@@ -73,10 +73,10 @@ def test_interactive_onboard_openai_defaults_to_available_model() -> None:
 def test_interactive_onboard_codex_defaults_to_supported_model() -> None:
     provider = next(provider for provider in ONBOARD_PROVIDERS if provider.key == "openai-codex")
 
-    assert provider.default_model == "openai-codex/gpt-5.4"
+    assert provider.default_model == "openai-codex/gpt-5.6-sol"
     assert provider.key_env is None
     assert provider.base_env == "OPENAI_CODEX_BASE_URL"
-    assert provider.suggested_models[0] == "openai-codex/gpt-5.4"
+    assert provider.suggested_models[0] == "openai-codex/gpt-5.6-sol"
 
 
 def test_legacy_cli_provider_choices_match_registry_defaults() -> None:
@@ -98,7 +98,7 @@ def test_interactive_onboard_suggests_current_primary_models() -> None:
     assert onboard_defaults["openrouter"] == "deepseek/deepseek-v4-pro"
     assert onboard_defaults["openai"] == "gpt-5.5"
     assert onboard_defaults["anthropic"] == "claude-sonnet-4-6"
-    assert onboard_defaults["openai-codex"] == "openai-codex/gpt-5.4"
+    assert onboard_defaults["openai-codex"] == "openai-codex/gpt-5.6-sol"
     assert onboard_defaults["deepseek"] == "deepseek-v4-pro"
     assert onboard_defaults["siliconflow-cn"] == "deepseek-ai/DeepSeek-V3.1-Terminus"
     assert onboard_defaults["siliconflow-global"] == "deepseek-ai/DeepSeek-V3.1-Terminus"
