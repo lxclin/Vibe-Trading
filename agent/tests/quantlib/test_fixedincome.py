@@ -12,6 +12,7 @@ import pytest
 
 from src.quantlib.fixedincome import (
     COMPOUNDING_CONVENTIONS,
+    DEFAULT_KEY_RATE_TENORS,
     CurveFit,
     accrued_interest,
     bond_cashflows,
@@ -20,6 +21,7 @@ from src.quantlib.fixedincome import (
     dv01,
     effective_duration,
     fit_yield_curve,
+    key_rate_duration,
     macaulay_duration,
     modified_duration,
     nelson_siegel,
@@ -420,6 +422,36 @@ def test_fit_is_robust_to_noise_and_stays_close_to_the_generating_curve():
     assert np.max(np.abs(fit(TENORS) - clean)) < 5e-4
 
 
+def test_fit_keeps_refined_decay_parameter_inside_requested_bounds():
+    bounds = (0.05, 2.0)
+    observed = nelson_siegel(TENORS, 0.03, -0.02, 0.015, 100.0)
+
+    fit = fit_yield_curve(
+        TENORS,
+        observed,
+        model="nelson_siegel",
+        decay_bounds=bounds,
+        grid_points=20,
+    )
+
+    assert bounds[0] <= fit.params[-1] <= bounds[1]
+
+
+def test_svensson_fit_keeps_both_refined_decay_parameters_inside_bounds():
+    bounds = (0.05, 2.0)
+    observed = svensson(TENORS, 0.04, -0.02, 0.02, -0.01, 20.0, 100.0)
+
+    fit = fit_yield_curve(
+        TENORS,
+        observed,
+        model="svensson",
+        decay_bounds=bounds,
+        grid_points=12,
+    )
+
+    assert all(bounds[0] <= decay <= bounds[1] for decay in fit.params[-2:])
+
+
 def test_curve_fit_is_frozen_and_callable():
     fit = fit_yield_curve(TENORS, nelson_siegel(TENORS, 0.04, -0.01, 0.01, 2.0),
                           model="nelson_siegel")
@@ -448,3 +480,50 @@ def test_fit_yield_curve_rejects_mismatched_or_thin_inputs():
 def test_fit_yield_curve_rejects_non_positive_maturities():
     with pytest.raises(ValueError, match="strictly positive"):
         fit_yield_curve(np.zeros(10), np.zeros(10), model="nelson_siegel")
+
+# --------------------------------------------------------------------------
+# Key Rate Duration Tests
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("freq", [1, 2, 4])
+@pytest.mark.parametrize("compounding", ["discrete", "continuous"])
+@pytest.mark.parametrize(
+    ("face", "coupon", "ytm", "n_periods"),
+    [
+        (100.0, 0.05, 0.04, 10),
+        (100.0, 0.0, 0.05, 10),
+        (100.0, 0.08, 0.06, 30),
+    ],
+)
+def test_key_rate_duration_sum_equals_modified_duration(face, coupon, ytm, n_periods, freq, compounding):
+    d_mod = modified_duration(face, coupon, ytm, n_periods, freq, compounding)
+    krd = key_rate_duration(face, coupon, ytm, n_periods, freq, compounding=compounding)
+
+    assert sum(krd.values()) == pytest.approx(d_mod, rel=1e-10)
+    assert all(val >= 0.0 for val in krd.values())
+
+
+def test_zero_coupon_bond_exact_key_rate_concentration():
+    # A 5-year zero coupon bond with annual frequency (n_periods=5, freq=1)
+    # should have all duration concentrated exactly at the 5.0Y key rate.
+    face = 100.0
+    coupon = 0.0
+    ytm = 0.05
+    n_periods = 5
+    freq = 1
+
+    d_mod = modified_duration(face, coupon, ytm, n_periods, freq)
+    krd = key_rate_duration(face, coupon, ytm, n_periods, freq)
+
+    assert krd[5.0] == pytest.approx(d_mod, rel=1e-10)
+    for tenor, val in krd.items():
+        if tenor != 5.0:
+            assert val == pytest.approx(0.0, abs=1e-12)
+
+
+def test_key_rate_duration_input_validation():
+    with pytest.raises(ValueError, match="key_rates must contain at least one tenor"):
+        key_rate_duration(100.0, 0.05, 0.05, 10, key_rates=[])
+    with pytest.raises(ValueError, match="strictly increasing"):
+        key_rate_duration(100.0, 0.05, 0.05, 10, key_rates=[5.0, 2.0, 10.0])

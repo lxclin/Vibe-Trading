@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from backtest.loaders.cn_adjust import apply_qfq as _apply_qfq
@@ -50,6 +51,10 @@ logger = logging.getLogger(__name__)
 # Date the SP500 constituent list was sampled from Wikipedia (best-effort label
 # for the survivorship-bias warning in the bench summary's ``meta`` block).
 _SP500_CONSTITUENT_SOURCE_DATE = "2026-05-17"
+# Below this share of named sectors the tag is worse than absent: one
+# "unknown" bucket demeans as a single group, which is the global fallback
+# the alphas already have, but reported as industry neutralization.
+_SP500_MIN_SECTOR_COVERAGE = 0.9
 
 # Concurrent Tushare ``pro.daily`` fetches when building CSI300. Free tier
 # allows ~200 calls/min; 4 workers stays well under that with a 300-name list.
@@ -474,11 +479,12 @@ def _load_sp500_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
     runner) surfaces this in the bench summary's ``meta`` block via the
     ``_meta`` panel key set below.
     """
-    codes = _fetch_sp500_constituents()
+    codes, sectors = _fetch_sp500_constituents()
     constituent_source = "wikipedia"
     constituent_source_date: str | None = _SP500_CONSTITUENT_SOURCE_DATE
     if not codes:
         codes = list(_SP500_FALLBACK_CODES)
+        sectors = {}
         constituent_source = "hand-picked fallback"
         constituent_source_date = None
         logger.warning("sp500: using %d-name fallback (degraded run)", len(codes))
@@ -501,6 +507,35 @@ def _load_sp500_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
     if all(k in panel for k in ("open", "high", "low", "close")):
         panel["vwap"] = (panel["open"] + panel["high"] + panel["low"] + panel["close"]) / 4.0
 
+    # 19 alpha101 alphas are industry-neutralized and the registry refuses them
+    # outright when the panel carries no ``sector`` tag, so the bench reported
+    # n_skipped=19 on every SP500 run. The labels come from the same Wikipedia
+    # table the constituents do — no extra request, no per-name lookup.
+    sector_coverage = 0.0
+    if sectors and "close" in panel and not panel["close"].empty:
+        columns = panel["close"].columns
+        labels = [sectors.get(str(code).removesuffix(".US"), "") for code in columns]
+        sector_coverage = sum(1 for label in labels if label) / len(labels)
+        # A mostly-unlabelled panel would demean one big "unknown" bucket, which
+        # is the global-demean fallback wearing a sector tag. Say so instead.
+        if sector_coverage >= _SP500_MIN_SECTOR_COVERAGE:
+            panel["sector"] = pd.DataFrame(
+                np.repeat(
+                    np.array([label or "UNKNOWN" for label in labels], dtype=object)[None, :],
+                    len(panel["close"].index),
+                    axis=0,
+                ),
+                index=panel["close"].index,
+                columns=columns,
+            )
+        else:
+            logger.warning(
+                "sp500: sector coverage %.1f%% below %.0f%% — leaving the tag off "
+                "so industry-neutralized alphas skip rather than demean one bucket",
+                sector_coverage * 100,
+                _SP500_MIN_SECTOR_COVERAGE * 100,
+            )
+
     # Attach a non-DataFrame metadata blob. Registry.compute() only iterates
     # required column names, so this extra key is ignored by the compute path.
     panel["_meta"] = {
@@ -510,12 +545,19 @@ def _load_sp500_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
         "constituent_source": constituent_source,
         "constituent_source_date": constituent_source_date,
         "constituent_count": len(codes),
+        "sector_source": "wikipedia GICS" if "sector" in panel else None,
+        "sector_coverage": round(sector_coverage, 4),
     }
     return panel
 
 
-def _fetch_sp500_constituents() -> list[str]:
-    """Pull current S&P 500 tickers from Wikipedia. Returns [] on any failure."""
+def _fetch_sp500_constituents() -> tuple[list[str], dict[str, str]]:
+    """Pull current S&P 500 tickers and GICS sectors from Wikipedia.
+
+    The sector labels ride along in the table we already request, so the 19
+    industry-neutralized alpha101 alphas cost no extra call. Returns
+    ``([], {})`` on any failure.
+    """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     try:
         import io
@@ -536,14 +578,27 @@ def _fetch_sp500_constituents() -> list[str]:
         tables = pd.read_html(io.StringIO(resp.text))
         for tbl in tables:
             if "Symbol" in tbl.columns:
-                tickers = tbl["Symbol"].astype(str).str.strip().tolist()
                 # yfinance prefers ``BRK-B`` over ``BRK.B`` — normalise
-                tickers = [t.replace(".", "-") for t in tickers if t and t != "nan"]
-                logger.info("sp500: %d tickers from Wikipedia", len(tickers))
-                return tickers
+                symbols = tbl["Symbol"].astype(str).str.strip().str.replace(".", "-", regex=False)
+                keep = symbols.ne("") & symbols.ne("nan")
+                tickers = symbols[keep].tolist()
+                sectors: dict[str, str] = {}
+                if "GICS Sector" in tbl.columns:
+                    labels = tbl["GICS Sector"].astype(str).str.strip()
+                    sectors = {
+                        symbol: label
+                        for symbol, label in zip(symbols[keep], labels[keep])
+                        if label and label != "nan"
+                    }
+                logger.info(
+                    "sp500: %d tickers from Wikipedia (%d with a GICS sector)",
+                    len(tickers),
+                    len(sectors),
+                )
+                return tickers, sectors
     except Exception as exc:  # noqa: BLE001
         logger.warning("sp500 Wikipedia fetch failed: %s", exc)
-    return []
+    return [], {}
 
 
 def _load_btc_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
@@ -723,6 +778,28 @@ _JINJA_TEMPLATE = """<!doctype html>
 {% endfor %}
 </table>
 
+{% if strict %}
+<h2>Strict gate</h2>
+<div class="meta">
+  Alpha t-stats against the same-universe random control. The strict gate
+  decides on these, not on IC.
+</div>
+<table>
+<tr><th>Alpha ID</th><th>alpha_t full</th><th>alpha_t train</th>
+    <th>alpha_t test</th><th>random IC mean</th><th>Category</th></tr>
+{% for row in top %}
+<tr>
+  <td>{{ row.id }}</td>
+  <td>{{ "%.4f"|format(row.get('alpha_t_full')) if row.get('alpha_t_full') is not none else "n/a" }}</td>
+  <td>{{ "%.4f"|format(row.get('alpha_t_train')) if row.get('alpha_t_train') is not none else "n/a" }}</td>
+  <td>{{ "%.4f"|format(row.get('alpha_t_test')) if row.get('alpha_t_test') is not none else "n/a" }}</td>
+  <td>{{ "%.6f"|format(row.get('random_ic_mean')) if row.get('random_ic_mean') is not none else "n/a" }}</td>
+  <td>{{ row.category }}</td>
+</tr>
+{% endfor %}
+</table>
+{% endif %}
+
 <h2>Formulas</h2>
 <table>
 <tr><th>Alpha ID</th><th>Formula (LaTeX source)</th></tr>
@@ -794,7 +871,30 @@ def _render_html_manual(ctx: dict[str, Any]) -> str:
             f"<td>{ic_pos}</td>"
             f"<td>{_esc(row['ic_count'])}</td></tr>"
         )
-    parts.append("</table><h2>Formulas</h2><table>")
+    parts.append("</table>")
+    if ctx.get("strict"):
+        parts.append(
+            "<h2>Strict gate</h2>"
+            "<div class=\"meta\">Alpha t-stats against the same-universe random "
+            "control. The strict gate decides on these, not on IC.</div><table>"
+            "<tr><th>Alpha ID</th><th>alpha_t full</th><th>alpha_t train</th>"
+            "<th>alpha_t test</th><th>random IC mean</th><th>Category</th></tr>"
+        )
+
+        def _fmt(value: Any, places: int = 4) -> str:
+            return "n/a" if value is None else _esc(f"{value:.{places}f}")
+
+        for row in ctx["top"]:
+            parts.append(
+                f"<tr><td>{_esc(row['id'])}</td>"
+                f"<td>{_fmt(row.get('alpha_t_full'))}</td>"
+                f"<td>{_fmt(row.get('alpha_t_train'))}</td>"
+                f"<td>{_fmt(row.get('alpha_t_test'))}</td>"
+                f"<td>{_fmt(row.get('random_ic_mean'), 6)}</td>"
+                f"<td>{_esc(row.get('category'))}</td></tr>"
+            )
+        parts.append("</table>")
+    parts.append("<h2>Formulas</h2><table>")
     parts.append("<tr><th>Alpha ID</th><th>Formula (LaTeX source)</th></tr>")
     for row in ctx["top"]:
         parts.append(
