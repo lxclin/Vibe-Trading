@@ -1,6 +1,6 @@
 {
   "app": {
-    "version": "v0.1.14"
+    "version": "v0.1.15"
   },
   "charts": {
     "noPriceData": "No price data for this symbol yet",
@@ -127,9 +127,9 @@
     "connectorVerifyFailed": "Connection verification failed.",
     "diagnosticCredentialsPartial": "Credentials are incomplete. Configure all required variables and recreate the service.",
     "diagnosticCredentialsConflict": "Credential sources conflict. Keep one complete source, then retry.",
-    "diagnosticSdkMissing": "The Longbridge SDK is not installed in the backend service.",
+    "diagnosticSdkMissing": "The SDK required by this broker is not installed in the backend service.",
     "diagnosticAuthenticationFailed": "Authentication failed. Check the configured credentials.",
-    "diagnosticNetworkUnreachable": "The Longbridge service is unreachable. Check network access and retry.",
+    "diagnosticNetworkUnreachable": "The broker service or local gateway is unreachable. Check the connection address and network access, then retry.",
     "diagnosticBrokerError": "The broker rejected the read-only verification request. Retry or check backend logs."
   },
   "scheduled": {
@@ -421,7 +421,134 @@
       "stoppedToast": "IM channels stopped",
       "refreshFailed": "Failed to refresh IM channels",
       "startFailed": "Failed to start IM channels",
-      "stopFailed": "Failed to stop IM channels"
+      "stopFailed": "Failed to stop IM channels",
+      "config": {
+        "toggleConfig": "Configure {{name}}",
+        "keepCurrent": "Keep current ({{masked}})",
+        "secretNotSet": "Not set",
+        "clearSecret": "Clear",
+        "required": "Required",
+        "listPlaceholder": "Type a value and press Enter",
+        "removeValue": "Remove {{value}}",
+        "save": "Save configuration",
+        "hotApply": "Saving applies immediately — no restart needed.",
+        "saved": "Channel configuration saved",
+        "saveFailed": "Failed to save the channel configuration: {{message}}",
+        "test": "Test connection",
+        "testing": "Testing…",
+        "testOk": "Connection verified",
+        "testFailed": "Connection test failed: {{message}}",
+        "testCodeOk": "The provider accepted these credentials.",
+        "testCodeInvalidCredentials": "The provider rejected these credentials.",
+        "testCodeNetwork": "The provider could not be reached.",
+        "testCodeUnsupported": "This channel does not support connection tests.",
+        "testedSavedConfig": "Tested the saved configuration.",
+        "testedDraftConfig": "Tested the values currently in the form (not saved yet).",
+        "enable": "Enable channel",
+        "enableHint": "Disabling keeps the stored credentials — you can re-enable at any time.",
+        "enabledToast": "Channel enabled",
+        "disabledToast": "Channel disabled",
+        "enableFailed": "Failed to enable the channel: {{message}}",
+        "disableFailed": "Failed to disable the channel: {{message}}",
+        "enableRejected": "The provider rejected these credentials, so the channel was not enabled.",
+        "enableRejectedDetail": "Provider response: {{detail}}",
+        "enableAnyway": "Enable anyway",
+        "enableAnywayHint": "Enabling anyway skips the credential check — the channel may fail to connect.",
+        "notWritable": "Channel configuration is stored in a YAML file ({{path}}), which the web UI cannot edit. Edit that file directly to change credentials.",
+        "notWritableChip": "Read-only (YAML)",
+        "sdkMissing": "Runtime SDK not installed — {{hint}}",
+        "sdkMissingNoHint": "Runtime SDK not installed; the channel can be configured but may not start.",
+        "noFields": "This channel has no configurable fields.",
+        "loadFailed": "Could not load channel configuration."
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID (AppKey)",
+            "help": "The app's AppKey from the Credentials page of the DingTalk developer console."
+          },
+          "client_secret": {
+            "label": "Client Secret (AppSecret)",
+            "help": "The app's AppSecret. Stored server-side and never sent back to the browser."
+          },
+          "allow_from": {
+            "label": "Allowed senders",
+            "help": "Optional allowlist of DingTalk sender IDs that may talk to the agent (\"*\" allows everyone). Unpaired senders receive a pairing code in a direct message."
+          },
+          "allow_remote_media_redirects": {
+            "label": "Allow remote media redirects",
+            "help": "Follow provider redirects when downloading message media. Off by default."
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "Allowed redirect hosts",
+            "help": "Hosts allowed when remote media redirects are enabled. An empty list blocks every cross-host redirect."
+          },
+          "group_user_isolation": {
+            "label": "Per-user group sessions",
+            "help": "Give each member of a group chat their own agent session instead of sharing one."
+          },
+          "force_ipv4": {
+            "label": "Force IPv4",
+            "help": "Bind DingTalk API calls to IPv4. Useful when the app's egress-IP whitelist holds a stable IPv4 address while the IPv6 prefix keeps rotating."
+          }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "The bot's AppID from the QQ Open Platform (q.qq.com) app settings."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "The bot's AppSecret. Stored server-side and never sent back to the browser."
+          },
+          "allow_from": {
+            "label": "Allowed senders",
+            "help": "Optional allowlist of QQ sender openids that may talk to the agent (\"*\" allows everyone). Unpaired senders receive a pairing code in a direct message."
+          },
+          "msg_format": {
+            "label": "Message format",
+            "help": "Reply format: plain or markdown."
+          },
+          "ack_message": {
+            "label": "Ack message",
+            "help": "Immediate acknowledgement sent when a message arrives. Leave empty to disable."
+          },
+          "media_dir": {
+            "label": "Media directory",
+            "help": "Where inbound attachments are saved. Empty uses ~/.vibe-trading/media/qq."
+          },
+          "download_chunk_size": {
+            "label": "Download chunk size",
+            "help": "Bytes per chunk when downloading attachments (default 262144)."
+          },
+          "download_max_bytes": {
+            "label": "Max download size (bytes)",
+            "help": "Safety cap for a single attachment download (default 209715200 = 200 MB)."
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "DingTalk setup guide",
+          "intro": "DingTalk bots use Stream Mode, so no public callback URL is needed.",
+          "step1": "Create an app in the DingTalk developer console (open-dev.dingtalk.com).",
+          "step2": "Add the bot capability to the app and enable Stream Mode for it.",
+          "step3": "Copy the app's AppKey into Client ID and its AppSecret into Client Secret.",
+          "step4": "Publish the app so it is available to your organization.",
+          "step5": "Return here, click Test connection, then enable the channel.",
+          "docsLabel": "Open the DingTalk developer console"
+        },
+        "qq": {
+          "title": "QQ setup guide",
+          "intro": "QQ bots connect over WebSocket via the official botpy SDK, so no public callback URL is needed.",
+          "step1": "Register on the QQ Open Platform (q.qq.com) and create a bot.",
+          "step2": "Copy the AppID and AppSecret from the bot's development settings page.",
+          "step3": "Paste them into the AppID and AppSecret fields above.",
+          "step4": "Add the bot to a QQ group or chat with it privately, following the platform's sandbox/publish rules.",
+          "step5": "Return here, click Test connection, then enable the channel.",
+          "docsLabel": "Open the QQ Open Platform"
+        }
+      }
     },
     "generation": "Generation",
     "dataSourceSettings": "Data Source Settings",
@@ -449,6 +576,9 @@
         "kr_equity": "Korea Equities",
         "ca_equity": "Canada Equities",
         "vietnam_equity": "Vietnam Equities",
+        "ar_equity": "Argentina Equities",
+        "uk_equity": "UK Equities",
+        "index": "Indices",
         "crypto": "Crypto",
         "futures": "Futures",
         "fund": "Funds",
@@ -457,7 +587,9 @@
       }
     },
     "tushareToken": "Tushare token",
+    "gildataToken": "Gildata token",
     "clearTushareToken": "Clear saved Tushare token",
+    "clearGildataToken": "Clear saved Gildata token",
     "saveDataSourceSettings": "Save data source settings",
     "baostock": "BaoStock",
     "loadLlmSettingsFailed": "Failed to load LLM settings: {{message}}",
@@ -489,7 +621,8 @@
     "oauth": "OAuth",
     "authentication": "Authentication",
     "apiKey": "API key",
-    "tushareTokenDesc": "Used for China A-share, futures, fund, and macro data. If unset, the project falls back to AKShare where available."
+    "tushareTokenDesc": "Used for China A-share, futures, fund, and macro data. If unset, the project falls back to AKShare where available.",
+    "gildataTokenDesc": "Optional Gildata (Hundsun Juyuan) feed for China A-shares. When set, it joins the tail of the A-share fallback chain with forward-adjusted daily bars."
   },
   "qveris": {
     "title": "QVeris Tool Marketplace",
@@ -608,7 +741,8 @@
       "failed": "Failed",
       "steps": "{{count}} steps",
       "continue": "Continue",
-      "reattach": "Re-attach"
+      "reattach": "Re-attach",
+      "checkingFigures": "Checking the figures in this answer (round {{round}})…"
     },
     "resumeConnector": "Resume connector",
     "resumeConnectorTitle": "Clear the kill switch and re-enable connector activity",
@@ -620,6 +754,8 @@
     "runNotFound": "Run not found",
     "runNotFoundDesc": "The run directory may have been removed, or your browser may not have API access configured. Check that the API authentication key is set in Settings if accessing remotely.",
     "goBack": "Go back",
+    "showFullPrompt": "Show full prompt",
+    "showLessPrompt": "Show less",
     "chart": "Chart",
     "trades": "Trades",
     "factor": "Factor Research",
@@ -632,9 +768,11 @@
     "maxDrawdown": "Max Drawdown",
     "symbol": "Symbol",
     "weight": "Weight",
-    "rebalanceCount": "Rebalances",
-    "turnoverMean": "Avg Turnover",
-    "turnoverMax": "Max Turnover",
+    "rebalanceCount": "Target changes (requested)",
+    "rebalanceExecuted": "Rebalance executions (fills)",
+    "rebalanceRealizedTurnover": "Realized rebalance turnover",
+    "turnoverMean": "Avg Turnover (requested)",
+    "turnoverMax": "Max Turnover (requested)",
     "largestRebalance": "Largest Rebalance",
     "date": "Date",
     "turnover": "Turnover",
@@ -677,6 +815,8 @@
     "noBacktestSummary": "No backtest summary recorded.",
     "noReproducibilityHashes": "No reproducibility hashes recorded.",
     "noScalarMetrics": "No scalar metrics recorded.",
+    "noStructuredMetrics": "No structured metrics recorded.",
+    "structuredMetrics": "Structured metrics",
     "noValidationPayload": "No validation payload recorded.",
     "noArtifactChecksums": "No artifact checksums recorded.",
     "noCodeFiles": "No code files.",
@@ -744,6 +884,9 @@
         "crypto": "Crypto",
         "futures": "Futures",
         "forex": "Forex",
+        "ar_equity": "Argentina equity",
+        "uk_equity": "UK equity",
+        "vietnam_equity": "Vietnam equity",
         "other": "Other"
       }
     },
@@ -1212,7 +1355,15 @@
     "maxPerOrder": "≤{{amount}}/order",
     "expiresOn": "expires {{date}}",
     "accountSummary": "{{broker}} · {{type}} account · funded by {{fundedBy}}",
-    "adjustRequestMessage": "For mandate proposal \"{{label}}\" (option {{ordinal}}): {{text}}"
+    "adjustRequestMessage": "For mandate proposal \"{{label}}\" (option {{ordinal}}): {{text}}",
+    "accountLoading": "Loading the broker's accounts…",
+    "accountLoadFailed": "Could not load the broker's accounts: {{error}}",
+    "accountLabel": "Account this mandate may trade",
+    "accountChoose": "Choose an account",
+    "accountDefault": " · broker default",
+    "accountDeactivated": " · deactivated",
+    "accountNotAgentic": " · agentic trading not allowed",
+    "accountHint": "The agent trades only this account. Nothing is chosen for you."
   },
   "messageBubble": {
     "elapsedTime": "Total response time",
@@ -1405,6 +1556,8 @@
   },
   "runDashboard": {
     "eyebrow": "Quantitative research · Backtest",
+    "noBacktestData": "This run has no backtest data to chart",
+    "noBacktestDataStudioHint": "It looks like a portfolio/risk analysis instead — check the Studio tab for its numbers.",
     "engine": "engine",
     "portfolio": "Portfolio",
     "systematicStrategy": "Systematic strategy",
@@ -1620,7 +1773,19 @@
       "testFailed": "{{label}} check failed: {{error}}",
       "unknownTestError": "The connector returned an unknown error.",
       "delete": "Delete",
-      "configured": "Required credentials configured"
+      "configured": "Required credentials configured",
+      "accountTitle": "Account",
+      "accountCurrent": "Reads the account ending ····{{last4}}",
+      "accountNone": "No account selected. This connection reads nothing until you choose one.",
+      "accountLoad": "Choose account",
+      "accountChange": "Change account",
+      "accountEmpty": "This login reaches no accounts.",
+      "accountPicker": "Accounts this login can reach",
+      "accountChoose": "Choose an account",
+      "accountDefault": " · broker default",
+      "accountDeactivated": " · deactivated",
+      "accountSave": "Use this account",
+      "accountSaved": "Account saved."
     }
   }
 }

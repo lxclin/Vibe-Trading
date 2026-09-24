@@ -1,6 +1,6 @@
 {
   "app": {
-    "version": "v0.1.14"
+    "version": "v0.1.15"
   },
   "layout": {
     "home": "الرئيسية",
@@ -122,9 +122,9 @@
     "connectorVerifyFailed": "فشل التحقق من الاتصال.",
     "diagnosticCredentialsPartial": "بيانات الاعتماد غير مكتملة. اضبط جميع المتغيرات المطلوبة، ثم أعد إنشاء الخدمة.",
     "diagnosticCredentialsConflict": "تتعارض مصادر بيانات الاعتماد. احتفظ بمصدر واحد مكتمل، ثم أعد المحاولة.",
-    "diagnosticSdkMissing": "حزمة Longbridge SDK غير مثبّتة في خدمة الخادم.",
+    "diagnosticSdkMissing": "حزمة SDK المطلوبة لهذا الوسيط غير مثبّتة في خدمة الخادم.",
     "diagnosticAuthenticationFailed": "فشلت المصادقة. تحقق من بيانات الاعتماد المضبوطة.",
-    "diagnosticNetworkUnreachable": "يتعذر الوصول إلى خدمة Longbridge. تحقق من اتصال الشبكة، ثم أعد المحاولة.",
+    "diagnosticNetworkUnreachable": "يتعذر الوصول إلى خدمة الوسيط أو البوابة المحلية. تحقق من عنوان الاتصال واتصال الشبكة، ثم أعد المحاولة.",
     "diagnosticBrokerError": "رفض الوسيط طلب التحقق المخصص للقراءة فقط. أعد المحاولة أو راجع سجلات الخادم."
   },
   "scheduled": {
@@ -416,7 +416,134 @@
       "stoppedToast": "تم إيقاف قنوات IM",
       "refreshFailed": "فشل تحديث قنوات IM",
       "startFailed": "فشل بدء قنوات IM",
-      "stopFailed": "فشل إيقاف قنوات IM"
+      "stopFailed": "فشل إيقاف قنوات IM",
+      "config": {
+        "toggleConfig": "تهيئة {{name}}",
+        "keepCurrent": "الإبقاء على القيمة الحالية ({{masked}})",
+        "secretNotSet": "غير مُعيّن",
+        "clearSecret": "مسح",
+        "required": "مطلوب",
+        "listPlaceholder": "اكتب قيمة واضغط Enter للإضافة",
+        "removeValue": "إزالة {{value}}",
+        "save": "حفظ الإعدادات",
+        "hotApply": "يُطبَّق الحفظ فورًا — دون حاجة إلى إعادة التشغيل.",
+        "saved": "تم حفظ إعدادات القناة",
+        "saveFailed": "تعذّر حفظ إعدادات القناة: {{message}}",
+        "test": "اختبار الاتصال",
+        "testing": "جارٍ الاختبار…",
+        "testOk": "تم التحقق من الاتصال",
+        "testFailed": "فشل اختبار الاتصال: {{message}}",
+        "testCodeOk": "قبل المزوّد بيانات الاعتماد هذه.",
+        "testCodeInvalidCredentials": "رفض المزوّد بيانات الاعتماد هذه.",
+        "testCodeNetwork": "تعذّر الوصول إلى المزوّد.",
+        "testCodeUnsupported": "هذه القناة لا تدعم اختبار الاتصال.",
+        "testedSavedConfig": "تم اختبار الإعدادات المحفوظة.",
+        "testedDraftConfig": "تم اختبار القيم الموجودة في النموذج (غير المحفوظة بعد).",
+        "enable": "تفعيل القناة",
+        "enableHint": "تعطيلها يحتفظ ببيانات الاعتماد المحفوظة — يمكنك إعادة التفعيل في أي وقت.",
+        "enabledToast": "تم تفعيل القناة",
+        "disabledToast": "تم تعطيل القناة",
+        "enableFailed": "تعذّر تفعيل القناة: {{message}}",
+        "disableFailed": "تعذّر تعطيل القناة: {{message}}",
+        "enableRejected": "رفض المزوّد بيانات الاعتماد هذه، لذا لم يتم تفعيل القناة.",
+        "enableRejectedDetail": "استجابة المزوّد: {{detail}}",
+        "enableAnyway": "التفعيل على أي حال",
+        "enableAnywayHint": "التفعيل على أي حال يتخطى التحقق من بيانات الاعتماد — قد لا تتمكن القناة من الاتصال.",
+        "notWritable": "إعدادات القناة محفوظة في ملف YAML ‏({{path}})، ولا يمكن تعديلها من واجهة الويب. حرّر الملف مباشرةً لتغيير بيانات الاعتماد.",
+        "notWritableChip": "للقراءة فقط (YAML)",
+        "sdkMissing": "حزمة التشغيل SDK غير مثبّتة — {{hint}}",
+        "sdkMissingNoHint": "حزمة التشغيل SDK غير مثبّتة؛ يمكن تهيئة القناة لكنها قد لا تبدأ.",
+        "noFields": "لا توجد حقول قابلة للتهيئة في هذه القناة.",
+        "loadFailed": "تعذّر تحميل إعدادات القناة."
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID (AppKey)",
+            "help": "مفتاح AppKey الخاص بالتطبيق من صفحة بيانات الاعتماد في وحدة تحكم مطوّري DingTalk."
+          },
+          "client_secret": {
+            "label": "Client Secret (AppSecret)",
+            "help": "سرّ التطبيق AppSecret. يُحفظ على الخادم ولا يُعاد إرساله إلى المتصفح."
+          },
+          "allow_from": {
+            "label": "المرسلون المسموحون",
+            "help": "قائمة اختيارية بمعرّفات مرسلي DingTalk المسموح لهم بالتفاعل مع الوكيل (\"*\" تسمح للجميع). المرسلون غير المقترنين يتلقون رمز اقتران في رسالة خاصة."
+          },
+          "allow_remote_media_redirects": {
+            "label": "السماح بإعادة توجيه الوسائط",
+            "help": "اتّباع إعادة توجيه المزوّد عند تنزيل وسائط الرسائل. معطّل افتراضيًا."
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "المضيفون المسموح بإعادة التوجيه إليهم",
+            "help": "المضيفون المسموح بها عند تفعيل إعادة توجيه الوسائط. القائمة الفارغة تحجب كل إعادة توجيه بين المضيفين."
+          },
+          "group_user_isolation": {
+            "label": "جلسة منفصلة لكل مستخدم في المجموعة",
+            "help": "منح كل عضو في محادثة المجموعة جلسة وكيل خاصة به بدلًا من جلسة مشتركة."
+          },
+          "force_ipv4": {
+            "label": "فرض IPv4",
+            "help": "يربط استدعاءات واجهة DingTalk بعنوان IPv4. مفيد عندما تحتوي قائمة عناوين IP المسموحة على عنوان IPv4 ثابت بينما تتغير بادئة IPv6 باستمرار."
+          }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "معرّف AppID الخاص بالروبوت من إعدادات التطبيق في منصة QQ المفتوحة (q.qq.com)."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "سرّ الروبوت AppSecret. يُحفظ على الخادم ولا يُعاد إرساله إلى المتصفح."
+          },
+          "allow_from": {
+            "label": "المرسلون المسموحون",
+            "help": "قائمة اختيارية بمعرّفات openid لمرسلي QQ المسموح لهم بالتفاعل مع الوكيل (\"*\" تسمح للجميع). المرسلون غير المقترنين يتلقون رمز اقتران في رسالة خاصة."
+          },
+          "msg_format": {
+            "label": "تنسيق الرسالة",
+            "help": "تنسيق الرد: plain أو markdown."
+          },
+          "ack_message": {
+            "label": "رسالة الإقرار",
+            "help": "إقرار فوري يُرسل عند وصول رسالة. اتركه فارغًا لتعطيله."
+          },
+          "media_dir": {
+            "label": "دليل الوسائط",
+            "help": "مكان حفظ المرفقات الواردة. القيمة الفارغة تستخدم ~/.vibe-trading/media/qq."
+          },
+          "download_chunk_size": {
+            "label": "حجم كتلة التنزيل",
+            "help": "عدد البايتات لكل كتلة عند تنزيل المرفقات (الافتراضي 262144)."
+          },
+          "download_max_bytes": {
+            "label": "الحد الأقصى لحجم التنزيل (بايت)",
+            "help": "حدّ أمان لتنزيل مرفق واحد (الافتراضي 209715200 = 200 ميغابايت)."
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "دليل إعداد DingTalk",
+          "intro": "تستخدم روبوتات DingTalk وضع Stream، لذا لا حاجة إلى عنوان URL عام للاستدعاء.",
+          "step1": "أنشئ تطبيقًا في وحدة تحكم مطوّري DingTalk ‏(open-dev.dingtalk.com).",
+          "step2": "أضف قدرة الروبوت إلى التطبيق وفعّل وضع Stream له.",
+          "step3": "انسخ AppKey الخاص بالتطبيق إلى Client ID وAppSecret إلى Client Secret.",
+          "step4": "انشر التطبيق ليتيح استخدامه داخل مؤسستك.",
+          "step5": "عد إلى هنا، وانقر على «اختبار الاتصال»، ثم فعّل القناة.",
+          "docsLabel": "فتح وحدة تحكم مطوّري DingTalk"
+        },
+        "qq": {
+          "title": "دليل إعداد QQ",
+          "intro": "تتصل روبوتات QQ عبر WebSocket باستخدام SDK الرسمي botpy، لذا لا حاجة إلى عنوان URL عام للاستدعاء.",
+          "step1": "سجّل في منصة QQ المفتوحة (q.qq.com) وأنشئ روبوتًا.",
+          "step2": "انسخ AppID وAppSecret من صفحة إعدادات تطوير الروبوت.",
+          "step3": "الصقهما في حقلي AppID وAppSecret أعلاه.",
+          "step4": "أضف الروبوت إلى مجموعة QQ أو تحدّث معه بشكل خاص، وفقًا لقواعد الصندوق الرملي/النشر الخاصة بالمنصة.",
+          "step5": "عد إلى هنا، وانقر على «اختبار الاتصال»، ثم فعّل القناة.",
+          "docsLabel": "فتح منصة QQ المفتوحة"
+        }
+      }
     },
     "generation": "إعدادات التوليد",
     "dataSourceSettings": "إعدادات مصادر البيانات",
@@ -444,6 +571,9 @@
         "kr_equity": "الأسهم الكورية",
         "ca_equity": "الأسهم الكندية",
         "vietnam_equity": "أسهم فيتنام",
+        "ar_equity": "الأسهم الأرجنتينية",
+        "uk_equity": "الأسهم البريطانية",
+        "index": "المؤشرات",
         "crypto": "العملات الرقمية",
         "futures": "العقود المستقبلية",
         "fund": "الصناديق",
@@ -452,7 +582,9 @@
       }
     },
     "tushareToken": "رمز Tushare",
+    "gildataToken": "رمز Gildata",
     "clearTushareToken": "مسح رمز Tushare المحفوظ",
+    "clearGildataToken": "مسح رمز Gildata المحفوظ",
     "saveDataSourceSettings": "حفظ إعدادات مصادر البيانات",
     "baostock": "BaoStock",
     "loadLlmSettingsFailed": "فشل تحميل إعدادات LLM: {{message}}",
@@ -484,7 +616,8 @@
     "oauth": "OAuth",
     "authentication": "المصادقة",
     "apiKey": "مفتاح API",
-    "tushareTokenDesc": "يُستخدم لبيانات الأسهم الصينية (فئة A) والعقود الآجلة والصناديق والاقتصاد الكلي. إذا لم يُضبط، يتراجع المشروع إلى AKShare حيثما توفر."
+    "tushareTokenDesc": "يُستخدم لبيانات الأسهم الصينية (فئة A) والعقود الآجلة والصناديق والاقتصاد الكلي. إذا لم يُضبط، يتراجع المشروع إلى AKShare حيثما توفر.",
+    "gildataTokenDesc": "مصدر اختياري من Gildata (هينغشنغ جويوان) للأسهم الصينية فئة A. عند تعيينه، ينضم إلى نهاية سلسلة التراجع للأسهم A ببيانات يومية معدّلة."
   },
   "qveris": {
     "title": "سوق أدوات QVeris",
@@ -603,7 +736,8 @@
       "failed": "فشل",
       "steps": "{{count}} خطوات",
       "continue": "متابعة",
-      "reattach": "إعادة الاتصال"
+      "reattach": "إعادة الاتصال",
+      "checkingFigures": "جارٍ التحقق من الأرقام في هذه الإجابة (الجولة {{round}})…"
     },
     "resumeConnector": "استئناف الموصل",
     "resumeConnectorTitle": "مسح مفتاح الإيقاف واستئناف نشاط الموصل",
@@ -615,6 +749,8 @@
     "runNotFound": "التشغيل غير موجود",
     "runNotFoundDesc": "ربما تم حذف دليل التشغيل، أو ربما لا يمتلك المتصفح حق الوصول إلى API. تحقّق من ضبط مفتاح مصادقة API في الإعدادات عند الوصول عن بُعد.",
     "goBack": "رجوع",
+    "showFullPrompt": "عرض الطلب كاملاً",
+    "showLessPrompt": "عرض أقل",
     "chart": "الرسم البياني",
     "trades": "التداولات",
     "factor": "تحليل العوامل",
@@ -627,9 +763,11 @@
     "maxDrawdown": "أقصى تراجع",
     "symbol": "الرمز",
     "weight": "الوزن",
-    "rebalanceCount": "عدد مرات إعادة التوازن",
-    "turnoverMean": "متوسط دوران",
-    "turnoverMax": "أقصى دوران",
+    "rebalanceCount": "تغييرات الهدف (المطلوبة)",
+    "rebalanceExecuted": "تنفيذات إعادة التوازن",
+    "rebalanceRealizedTurnover": "دوران إعادة التوازن المحقق",
+    "turnoverMean": "متوسط دوران (المطلوب)",
+    "turnoverMax": "أقصى دوران (المطلوب)",
     "largestRebalance": "أكبر إعادة توازن",
     "date": "التاريخ",
     "turnover": "دوران",
@@ -672,6 +810,8 @@
     "noBacktestSummary": "لم يتم تسجيل ملخص اختبار عكسي.",
     "noReproducibilityHashes": "لم يتم تسجيل تجزئات قابلية إعادة الإنتاج.",
     "noScalarMetrics": "لم يتم تسجيل مقاييس عددية.",
+    "noStructuredMetrics": "لم يتم تسجيل أي مقاييس مهيكلة.",
+    "structuredMetrics": "المقاييس المهيكلة",
     "noValidationPayload": "لم يتم تسجيل حمولة التحقق.",
     "noArtifactChecksums": "لم يتم تسجيل مجاميع التحقق للمنتجات.",
     "noCodeFiles": "لا توجد ملفات شفرة.",
@@ -739,6 +879,9 @@
         "crypto": "عملات رقمية",
         "futures": "عقود آجلة",
         "forex": "عملات أجنبية",
+        "ar_equity": "أسهم أرجنتينية",
+        "uk_equity": "أسهم بريطانية",
+        "vietnam_equity": "أسهم فيتنامية",
         "other": "أخرى"
       }
     },
@@ -1207,7 +1350,15 @@
     "maxPerOrder": "بحد أقصى {{amount}} لكل أمر",
     "expiresOn": "ينتهي في {{date}}",
     "accountSummary": "{{broker}} · حساب {{type}} · ممول من {{fundedBy}}",
-    "adjustRequestMessage": "لطلب تعديل اقتراح التفويض «{{label}}» (الخيار {{ordinal}}): {{text}}"
+    "adjustRequestMessage": "لطلب تعديل اقتراح التفويض «{{label}}» (الخيار {{ordinal}}): {{text}}",
+    "accountLoading": "جارٍ تحميل حسابات الوسيط…",
+    "accountLoadFailed": "تعذّر تحميل حسابات الوسيط: {{error}}",
+    "accountLabel": "الحساب الذي يمكن لهذا التفويض التداول فيه",
+    "accountChoose": "اختر حسابًا",
+    "accountDefault": " · الافتراضي لدى الوسيط",
+    "accountDeactivated": " · معطّل",
+    "accountNotAgentic": " · لا يُسمح بتداول الوكيل",
+    "accountHint": "يتداول الوكيل في هذا الحساب فقط، ولن يُختار أي حساب نيابةً عنك."
   },
   "messageBubble": {
     "elapsedTime": "إجمالي وقت الاستجابة",
@@ -1405,6 +1556,8 @@
   },
   "runDashboard": {
     "eyebrow": "بحث كمّي · اختبار رجعي",
+    "noBacktestData": "لا توجد بيانات اختبار رجعي لعرضها في هذا التشغيل",
+    "noBacktestDataStudioHint": "يبدو أنه تحليل محفظة/مخاطر بدلاً من ذلك — راجع أرقامه في تبويب Studio.",
     "engine": "محرك",
     "portfolio": "محفظة",
     "systematicStrategy": "استراتيجية منهجية",
@@ -1620,7 +1773,19 @@
       "testFailed": "فشل اختبار {{label}}: {{error}}",
       "unknownTestError": "أرجع الموصل خطأ غير معروف.",
       "delete": "حذف",
-      "configured": "بيانات الاعتماد المطلوبة مضبوطة"
+      "configured": "بيانات الاعتماد المطلوبة مضبوطة",
+      "accountTitle": "الحساب",
+      "accountCurrent": "يقرأ الحساب المنتهي بـ ····{{last4}}",
+      "accountNone": "لم يتم اختيار حساب. لن يقرأ هذا الاتصال أي بيانات حتى تختار حسابًا.",
+      "accountLoad": "اختيار الحساب",
+      "accountChange": "تغيير الحساب",
+      "accountEmpty": "لا يصل تسجيل الدخول هذا إلى أي حساب.",
+      "accountPicker": "الحسابات التي يصل إليها تسجيل الدخول هذا",
+      "accountChoose": "اختر حسابًا",
+      "accountDefault": " · الافتراضي لدى الوسيط",
+      "accountDeactivated": " · معطّل",
+      "accountSave": "استخدام هذا الحساب",
+      "accountSaved": "تم حفظ الحساب."
     }
   }
 }

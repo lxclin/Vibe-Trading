@@ -227,7 +227,14 @@ def _resolve_sections(sections: Optional[List[str]]) -> List[str]:
 
 def _market_for(ticker: str) -> str:
     """Classify a ticker into a coarse market label for the envelope."""
-    return "hk" if ticker.strip().upper().endswith(".HK") else "us"
+    upper = ticker.strip().upper()
+    if upper.endswith(".HK"):
+        return "hk"
+    if upper.endswith(".L"):
+        return "uk"
+    if upper.endswith(".BA"):
+        return "ar"
+    return "us"
 
 
 class StockProfileTool(BaseTool):
@@ -236,12 +243,13 @@ class StockProfileTool(BaseTool):
     name = "get_stock_profile"
     repeatable = True
     description = (
-        "Fetch a read-only company profile for a US or Hong Kong listing from "
-        "Yahoo Finance: valuation key statistics, analyst price targets and "
-        "earnings/revenue estimates, institutional and insider ownership, and "
-        "the analyst recommendation trend. Use this for fundamentals and "
-        "consensus context, not for OHLCV price bars (use get_market_data). "
-        'Example: get_stock_profile(ticker="AAPL.US", '
+        "Fetch a read-only company profile for a US, Hong Kong, UK (LSE .L), or "
+        "Argentina (BYMA .BA) "
+        "listing from Yahoo Finance: valuation key statistics, analyst price "
+        "targets and earnings/revenue estimates, institutional and insider "
+        "ownership, and the analyst recommendation trend. Use this for "
+        "fundamentals and consensus context, not for OHLCV price bars (use "
+        "get_market_data). Example: get_stock_profile(ticker=\"AAPL.US\", "
         'sections=["key_stats", "financials"]).'
     )
     parameters = {
@@ -250,8 +258,9 @@ class StockProfileTool(BaseTool):
             "ticker": {
                 "type": "string",
                 "description": (
-                    "US or HK symbol. US uses a bare or .US suffix (AAPL or "
-                    "AAPL.US); HK uses a zero-padded .HK code (00700.HK)."
+                    "US, HK, UK (LSE .L), or Argentina (BYMA .BA) symbol. US uses a bare or .US suffix "
+                    "(AAPL or AAPL.US); HK uses a zero-padded .HK code "
+                    "(00700.HK); UK uses the .L suffix (VOD.L)."
                 ),
             },
             "sections": {

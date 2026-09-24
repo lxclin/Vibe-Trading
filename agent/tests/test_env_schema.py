@@ -115,6 +115,8 @@ class TestEnvConfigDefaults:
         assert c.data.alphavantage_api_key == ""
         assert c.data.tiingo_api_key == ""
         assert c.data.fmp_api_key == ""
+        assert c.data.gildata_token == ""
+        assert c.data.gildata_base_url.endswith("aidata-assistant-srv-rawapi")
         assert c.data.fred_api_key == ""
         assert c.data.vibe_trading_iwencai_key == ""
         assert c.data.vibe_trading_sec_ua == ""
@@ -125,12 +127,15 @@ class TestEnvConfigDefaults:
         assert c.data.longbridge_app_secret == ""
         assert c.data.longbridge_access_token == ""
         # Per-market source-order overrides default to unset (default chains).
-        for market in (
-            "a_share", "us_equity", "hk_equity", "india_equity", "kr_equity",
-            "ca_equity", "vietnam_equity", "crypto", "futures", "fund",
-            "macro", "forex",
-        ):
-            assert getattr(c.data, f"market_data_order_{market}") == ""
+        # Derived from the chains, not hand-listed: the hand-written list here
+        # and the field block it guarded both missed uk_equity for as long as
+        # that market existed, so a new market shipped without its typed field.
+        from backtest.loaders.registry import FALLBACK_CHAINS
+
+        for market in FALLBACK_CHAINS:
+            field = f"market_data_order_{market}"
+            assert hasattr(c.data, field), f"{field} missing from EnvConfig.data"
+            assert getattr(c.data, field) == ""
 
     def test_api_defaults(self) -> None:
         c = EnvConfig()
@@ -169,6 +174,7 @@ class TestEnvConfigDefaults:
         assert c.agent_tuning.content_filter_warning_threshold == 0.05
         assert c.agent_tuning.vibe_trading_enable_advisory is False
         assert c.agent_tuning.vibe_trading_enable_scheduler is False
+        assert c.agent_tuning.vibe_contextual_identity_constraints is True
         assert c.agent_tuning.vibe_trading_scheduler_max_consecutive_failures == 3
         assert c.agent_tuning.vibe_trading_scheduler_retry_base_delay_ms == 60_000
         assert c.agent_tuning.vibe_trading_scheduler_retry_max_delay_ms == 3_600_000
@@ -241,6 +247,13 @@ class TestEnvConfigTypeCoercion:
         assert tuning.vibe_trading_scheduler_max_consecutive_failures == 5
         assert tuning.vibe_trading_scheduler_retry_base_delay_ms == 2500
         assert tuning.vibe_trading_scheduler_retry_max_delay_ms == 10000
+
+    def test_contextual_identity_constraints_can_be_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBE_CONTEXTUAL_IDENTITY_CONSTRAINTS", "false")
+
+        assert EnvConfig().agent_tuning.vibe_contextual_identity_constraints is False
 
 
 # ===================================================================

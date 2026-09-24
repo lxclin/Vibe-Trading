@@ -1,6 +1,6 @@
 {
   "app": {
-    "version": "v0.1.14"
+    "version": "v0.1.15"
   },
   "layout": {
     "home": "홈",
@@ -122,9 +122,9 @@
     "connectorVerifyFailed": "연결 검증에 실패했습니다.",
     "diagnosticCredentialsPartial": "인증 정보가 불완전합니다. 필수 변수를 모두 설정하고 서비스를 다시 생성하세요.",
     "diagnosticCredentialsConflict": "인증 정보 출처가 충돌합니다. 완전한 출처 하나만 남긴 뒤 다시 시도하세요.",
-    "diagnosticSdkMissing": "백엔드 서비스에 Longbridge SDK가 설치되어 있지 않습니다.",
+    "diagnosticSdkMissing": "이 브로커에 필요한 SDK가 백엔드 서비스에 설치되어 있지 않습니다.",
     "diagnosticAuthenticationFailed": "인증에 실패했습니다. 설정된 인증 정보를 확인하세요.",
-    "diagnosticNetworkUnreachable": "Longbridge 서비스에 연결할 수 없습니다. 네트워크 연결을 확인하고 다시 시도하세요.",
+    "diagnosticNetworkUnreachable": "브로커 서비스 또는 로컬 게이트웨이에 연결할 수 없습니다. 연결 주소와 네트워크 연결을 확인한 후 다시 시도하세요.",
     "diagnosticBrokerError": "브로커가 읽기 전용 검증 요청을 거부했습니다. 다시 시도하거나 백엔드 로그를 확인하세요."
   },
   "scheduled": {
@@ -416,7 +416,134 @@
       "stoppedToast": "IM 채널이 중지되었습니다",
       "refreshFailed": "IM 채널 새로 고침 실패",
       "startFailed": "IM 채널 시작 실패",
-      "stopFailed": "IM 채널 중지 실패"
+      "stopFailed": "IM 채널 중지 실패",
+      "config": {
+        "toggleConfig": "{{name}} 설정",
+        "keepCurrent": "현재 값 유지({{masked}})",
+        "secretNotSet": "설정되지 않음",
+        "clearSecret": "지우기",
+        "required": "필수",
+        "listPlaceholder": "값을 입력하고 Enter로 추가",
+        "removeValue": "{{value}} 제거",
+        "save": "설정 저장",
+        "hotApply": "저장하면 즉시 적용됩니다. 재시작이 필요하지 않습니다.",
+        "saved": "채널 설정을 저장했습니다",
+        "saveFailed": "채널 설정 저장 실패: {{message}}",
+        "test": "연결 테스트",
+        "testing": "테스트 중…",
+        "testOk": "연결이 확인되었습니다",
+        "testFailed": "연결 테스트 실패: {{message}}",
+        "testCodeOk": "공급자가 이 자격 증명을 수락했습니다.",
+        "testCodeInvalidCredentials": "공급자가 이 자격 증명을 거부했습니다.",
+        "testCodeNetwork": "공급자에 연결할 수 없습니다.",
+        "testCodeUnsupported": "이 채널은 연결 테스트를 지원하지 않습니다.",
+        "testedSavedConfig": "저장된 설정을 테스트했습니다.",
+        "testedDraftConfig": "양식의 현재 값(아직 저장되지 않음)을 테스트했습니다.",
+        "enable": "채널 사용",
+        "enableHint": "사용을 중지해도 저장된 자격 증명은 유지되며 언제든 다시 사용할 수 있습니다.",
+        "enabledToast": "채널을 사용하도록 설정했습니다",
+        "disabledToast": "채널을 사용 중지했습니다",
+        "enableFailed": "채널 사용 설정 실패: {{message}}",
+        "disableFailed": "채널 사용 중지 실패: {{message}}",
+        "enableRejected": "공급자가 자격 증명을 거부하여 채널을 사용하도록 설정하지 않았습니다.",
+        "enableRejectedDetail": "공급자 응답: {{detail}}",
+        "enableAnyway": "그래도 사용",
+        "enableAnywayHint": "그래도 사용하면 자격 증명 검사를 건너뛰므로 채널이 연결되지 않을 수 있습니다.",
+        "notWritable": "채널 설정이 YAML 파일({{path}})에 저장되어 있어 웹 UI에서 편집할 수 없습니다. 자격 증명을 변경하려면 해당 파일을 직접 편집하세요.",
+        "notWritableChip": "읽기 전용(YAML)",
+        "sdkMissing": "런타임 SDK가 설치되지 않음 — {{hint}}",
+        "sdkMissingNoHint": "런타임 SDK가 설치되어 있지 않습니다. 설정은 가능하지만 시작하지 못할 수 있습니다.",
+        "noFields": "이 채널에는 구성할 수 있는 필드가 없습니다.",
+        "loadFailed": "채널 설정을 불러오지 못했습니다."
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID(AppKey)",
+            "help": "DingTalk 개발자 콘솔의 자격 증명 페이지에 있는 앱 AppKey입니다."
+          },
+          "client_secret": {
+            "label": "Client Secret(AppSecret)",
+            "help": "앱의 AppSecret입니다. 서버에 저장되며 브라우저로 다시 전송되지 않습니다."
+          },
+          "allow_from": {
+            "label": "허용된 발신자",
+            "help": "에이전트와 대화할 수 있는 DingTalk 발신자 ID 허용 목록입니다(\"*\"는 모두 허용). 페어링되지 않은 발신자는 DM으로 페어링 코드를 받습니다."
+          },
+          "allow_remote_media_redirects": {
+            "label": "미디어 리디렉션 허용",
+            "help": "메시지 미디어를 내려받을 때 공급자 리디렉션을 따릅니다. 기본값은 꺼짐입니다."
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "허용된 리디렉션 호스트",
+            "help": "미디어 리디렉션을 켰을 때 허용할 호스트입니다. 비어 있으면 모든 교차 호스트 리디렉션이 차단됩니다."
+          },
+          "group_user_isolation": {
+            "label": "그룹에서 사용자별 세션 분리",
+            "help": "그룹 채팅의 각 멤버에게 별도의 에이전트 세션을 제공합니다."
+          },
+          "force_ipv4": {
+            "label": "IPv4 강제",
+            "help": "DingTalk API 호출을 IPv4에 바인딩합니다. 발신 IP 화이트리스트를 사용 중이고 IPv6 접두사는 자주 바뀌지만 IPv4는 안정적일 때 활성화하세요."
+          }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "QQ 오픈 플랫폼(q.qq.com) 앱 설정에 있는 봇의 AppID입니다."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "봇의 AppSecret입니다. 서버에 저장되며 브라우저로 다시 전송되지 않습니다."
+          },
+          "allow_from": {
+            "label": "허용된 발신자",
+            "help": "에이전트와 대화할 수 있는 QQ 발신자 openid 허용 목록입니다(\"*\"는 모두 허용). 페어링되지 않은 발신자는 DM으로 페어링 코드를 받습니다."
+          },
+          "msg_format": {
+            "label": "메시지 형식",
+            "help": "응답 형식: plain 또는 markdown."
+          },
+          "ack_message": {
+            "label": "확인 메시지",
+            "help": "메시지가 도착했을 때 즉시 보내는 확인 응답입니다. 비워 두면 전송하지 않습니다."
+          },
+          "media_dir": {
+            "label": "미디어 디렉터리",
+            "help": "수신한 첨부 파일을 저장할 위치입니다. 비워 두면 ~/.vibe-trading/media/qq를 사용합니다."
+          },
+          "download_chunk_size": {
+            "label": "다운로드 청크 크기",
+            "help": "첨부 파일을 내려받을 때 청크당 바이트 수(기본 262144)."
+          },
+          "download_max_bytes": {
+            "label": "최대 다운로드 크기(바이트)",
+            "help": "첨부 파일 하나 다운로드의 안전 상한(기본 209715200 = 200 MB)."
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "DingTalk 설정 가이드",
+          "intro": "DingTalk 봇은 Stream 모드를 사용하므로 공개 콜백 URL이 필요하지 않습니다.",
+          "step1": "DingTalk 개발자 콘솔(open-dev.dingtalk.com)에서 앱을 만듭니다.",
+          "step2": "앱에 봇 기능을 추가하고 Stream 모드를 사용 설정합니다.",
+          "step3": "앱의 AppKey를 Client ID에, AppSecret을 Client Secret에 붙여 넣습니다.",
+          "step4": "앱을 게시하여 조직에서 사용할 수 있게 합니다.",
+          "step5": "여기로 돌아와 '연결 테스트'를 클릭한 다음 채널을 사용 설정합니다.",
+          "docsLabel": "DingTalk 개발자 콘솔 열기"
+        },
+        "qq": {
+          "title": "QQ 설정 가이드",
+          "intro": "QQ 봇은 공식 botpy SDK를 통해 WebSocket으로 연결되므로 공개 콜백 URL이 필요하지 않습니다.",
+          "step1": "QQ 오픈 플랫폼(q.qq.com)에 등록하고 봇을 만듭니다.",
+          "step2": "봇의 개발 설정 페이지에서 AppID와 AppSecret을 복사합니다.",
+          "step3": "위의 AppID 및 AppSecret 필드에 붙여 넣습니다.",
+          "step4": "플랫폼의 샌드박스/게시 규칙에 따라 봇을 QQ 그룹에 추가하거나 개인 채팅을 시작합니다.",
+          "step5": "여기로 돌아와 '연결 테스트'를 클릭한 다음 채널을 사용 설정합니다.",
+          "docsLabel": "QQ 오픈 플랫폼 열기"
+        }
+      }
     },
     "generation": "생성 설정",
     "dataSourceSettings": "데이터 소스 설정",
@@ -444,6 +571,9 @@
         "kr_equity": "한국 주식",
         "ca_equity": "캐나다 주식",
         "vietnam_equity": "베트남 주식",
+        "ar_equity": "아르헨티나 주식",
+        "uk_equity": "영국 주식",
+        "index": "지수",
         "crypto": "암호화폐",
         "futures": "선물",
         "fund": "펀드",
@@ -452,7 +582,9 @@
       }
     },
     "tushareToken": "Tushare 토큰",
+    "gildataToken": "Gildata 토큰",
     "clearTushareToken": "저장된 Tushare 토큰 삭제",
+    "clearGildataToken": "저장된 Gildata 토큰 삭제",
     "saveDataSourceSettings": "데이터 소스 설정 저장",
     "baostock": "BaoStock",
     "loadLlmSettingsFailed": "LLM 설정 로드 실패: {{message}}",
@@ -484,7 +616,8 @@
     "oauth": "OAuth",
     "authentication": "인증",
     "apiKey": "API 키",
-    "tushareTokenDesc": "중국 A주·선물·펀드·거시 데이터에 사용됩니다. 설정하지 않으면 가능한 경우 AKShare로 대체됩니다."
+    "tushareTokenDesc": "중국 A주·선물·펀드·거시 데이터에 사용됩니다. 설정하지 않으면 가능한 경우 AKShare로 대체됩니다.",
+    "gildataTokenDesc": "선택 사항: 헝성쥐위안(Gildata) 중국 A주 데이터 소스. 설정하면 전방 조정 일봉으로 A주 폴백 체인 끝에 추가됩니다."
   },
   "qveris": {
     "title": "QVeris 도구 마켓플레이스",
@@ -603,7 +736,8 @@
       "failed": "실패",
       "steps": "{{count}}단계",
       "continue": "계속",
-      "reattach": "다시 연결"
+      "reattach": "다시 연결",
+      "checkingFigures": "답변 속 수치 확인 중({{round}}차)…"
     },
     "resumeConnector": "커넥터 재개",
     "resumeConnectorTitle": "킬 스위치를 해제하고 커넥터 활동을 재개",
@@ -615,6 +749,8 @@
     "runNotFound": "실행을 찾을 수 없음",
     "runNotFoundDesc": "실행 디렉터리가 제거되었거나 브라우저에 API 액세스가 설정되지 않았을 수 있습니다. 원격으로 액세스하는 경우 설정에서 API 인증 키가 설정되어 있는지 확인하세요.",
     "goBack": "뒤로",
+    "showFullPrompt": "전체 프롬프트 보기",
+    "showLessPrompt": "간략히 보기",
     "chart": "차트",
     "trades": "거래",
     "factor": "팩터 분석",
@@ -627,9 +763,11 @@
     "maxDrawdown": "최대 낙폭",
     "symbol": "심볼",
     "weight": "비중",
-    "rebalanceCount": "리밸런스 횟수",
-    "turnoverMean": "평균 회전율",
-    "turnoverMax": "최대 회전율",
+    "rebalanceCount": "목표 리밸런스 횟수(요청)",
+    "rebalanceExecuted": "실행된 리밸런스 수",
+    "rebalanceRealizedTurnover": "실현 리밸런스 회전율",
+    "turnoverMean": "평균 회전율(요청)",
+    "turnoverMax": "최대 회전율(요청)",
     "largestRebalance": "최대 리밸런스",
     "date": "날짜",
     "turnover": "회전율",
@@ -672,6 +810,8 @@
     "noBacktestSummary": "기록된 백테스트 요약이 없습니다.",
     "noReproducibilityHashes": "기록된 재현성 해시가 없습니다.",
     "noScalarMetrics": "기록된 스칼라 지표가 없습니다.",
+    "noStructuredMetrics": "기록된 구조화 지표가 없습니다.",
+    "structuredMetrics": "구조화된 지표",
     "noValidationPayload": "기록된 검증 페이로드가 없습니다.",
     "noArtifactChecksums": "기록된 아티팩트 체크섬이 없습니다.",
     "noCodeFiles": "코드 파일이 없습니다.",
@@ -739,6 +879,9 @@
         "crypto": "암호화폐",
         "futures": "선물",
         "forex": "외환",
+        "ar_equity": "아르헨티나 주식",
+        "uk_equity": "영국 주식",
+        "vietnam_equity": "베트남 주식",
         "other": "기타"
       }
     },
@@ -1207,7 +1350,15 @@
     "maxPerOrder": "주문당 {{amount}} 이하",
     "expiresOn": "{{date}} 만료",
     "accountSummary": "{{broker}} · {{type}} 계정 · 자금 제공: {{fundedBy}}",
-    "adjustRequestMessage": "운용 권한 제안 \"{{label}}\"(옵션 {{ordinal}})에 대한 조정 요청: {{text}}"
+    "adjustRequestMessage": "운용 권한 제안 \"{{label}}\"(옵션 {{ordinal}})에 대한 조정 요청: {{text}}",
+    "accountLoading": "브로커 계좌를 불러오는 중…",
+    "accountLoadFailed": "브로커 계좌를 불러오지 못했습니다: {{error}}",
+    "accountLabel": "이 mandate로 거래할 계좌",
+    "accountChoose": "계좌 선택",
+    "accountDefault": " · 브로커 기본값",
+    "accountDeactivated": " · 비활성화됨",
+    "accountNotAgentic": " · 에이전트 거래 허용 안 됨",
+    "accountHint": "에이전트는 이 계좌에서만 거래합니다. 자동으로 선택되지 않습니다."
   },
   "messageBubble": {
     "elapsedTime": "총 응답 시간",
@@ -1405,6 +1556,8 @@
   },
   "runDashboard": {
     "eyebrow": "계량 리서치 · 백테스트",
+    "noBacktestData": "이 실행에는 표시할 백테스트 데이터가 없습니다",
+    "noBacktestDataStudioHint": "포트폴리오/리스크 분석으로 보입니다 — 수치는 Studio 탭에서 확인하세요.",
     "engine": "엔진",
     "portfolio": "포트폴리오",
     "systematicStrategy": "시스테매틱 전략",
@@ -1620,7 +1773,19 @@
       "testFailed": "{{label}} 테스트 실패: {{error}}",
       "unknownTestError": "커넥터가 알 수 없는 오류를 반환했습니다.",
       "delete": "삭제",
-      "configured": "필요한 자격 증명이 설정되었습니다"
+      "configured": "필요한 자격 증명이 설정되었습니다",
+      "accountTitle": "계좌",
+      "accountCurrent": "끝자리 ····{{last4}} 계좌를 읽습니다",
+      "accountNone": "선택된 계좌가 없습니다. 계좌를 선택하기 전까지 이 연결은 아무것도 읽지 않습니다.",
+      "accountLoad": "계좌 선택",
+      "accountChange": "계좌 변경",
+      "accountEmpty": "이 로그인으로 접근할 수 있는 계좌가 없습니다.",
+      "accountPicker": "이 로그인으로 접근할 수 있는 계좌",
+      "accountChoose": "계좌 선택",
+      "accountDefault": " · 브로커 기본값",
+      "accountDeactivated": " · 비활성화됨",
+      "accountSave": "이 계좌 사용",
+      "accountSaved": "계좌를 저장했습니다."
     }
   }
 }

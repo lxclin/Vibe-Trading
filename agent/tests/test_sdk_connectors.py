@@ -58,6 +58,9 @@ def test_sdk_profiles_registered() -> None:
         "shoonya-paper-sdk", "shoonya-live-sdk-readonly",
         "etoro-paper-sdk", "etoro-paper-trade",
         "etoro-live-sdk-readonly", "etoro-live-trade",
+        "kis-paper-sdk", "kis-paper-trade", "kis-live-sdk-readonly",
+        "upbit-paper-sdk", "upbit-paper-trade", "upbit-live-sdk-readonly",
+        "toss-live-sdk-readonly",
     } <= ids
 
 
@@ -66,7 +69,7 @@ def test_no_discriminator_brokers_expose_no_live_trade_profile() -> None:
     Shoonya) must NOT register any live order-placing profile — the Longbridge
     precedent. A ``*-live-trade`` profile here would be a red-line regression."""
     ids = {p.id for p in profiles.list_profiles()}
-    for broker in ("longbridge", "dhan", "shoonya"):
+    for broker in ("longbridge", "dhan", "shoonya", "upbit"):
         assert f"{broker}-live-trade" not in ids
         # No live profile for these brokers may advertise an order capability.
         for p in profiles.list_profiles():
@@ -874,10 +877,22 @@ def test_in_broker_paper_place_order_simulated_locally(mod, Config) -> None:
 
 @pytest.mark.parametrize("mod, Config", [(dh, dh.DhanConfig), (sh, sh.ShoonyaConfig)])
 def test_in_broker_paper_cancel_order_simulated(mod, Config) -> None:
-    result = mod.cancel_order(Config(profile="paper"), "ORD1")
+    placed = mod.place_order(Config(profile="paper"), symbol="RELIANCE", side="buy", quantity=10)
+    result = mod.cancel_order(Config(profile="paper"), placed["order_id"])
     assert result["status"] == "ok"
     assert result["cancelled"] is True
     assert result["is_paper"] is True
+
+
+@pytest.mark.parametrize("mod, Config", [(dh, dh.DhanConfig), (sh, sh.ShoonyaConfig)])
+def test_in_broker_paper_cancel_refuses_an_order_it_never_issued(mod, Config) -> None:
+    """The paper profile reads the real account, so a live order id can reach
+    the simulated cancel; acknowledging it would report a cancel that never
+    happened while the real order keeps working."""
+    result = mod.cancel_order(Config(profile="paper"), "ORD1")
+    assert result["status"] == "error"
+    assert "cancelled" not in result
+    assert "not issued by this paper simulator" in result["error"]
 
 
 def test_in_broker_order_ops_classified_write() -> None:

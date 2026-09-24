@@ -161,6 +161,9 @@ class LLMConfig(_EnvBase):
     vibe_trading_disable_http_proxy: EnvBool = Field(
         alias="VIBE_TRADING_DISABLE_HTTP_PROXY", default=False,
     )
+    vibe_trading_anthropic_prompt_cache: EnvBool = Field(
+        alias="VIBE_TRADING_ANTHROPIC_PROMPT_CACHE", default=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +188,11 @@ class DataConfig(_EnvBase):
     alphavantage_api_key: str = Field(alias="ALPHAVANTAGE_API_KEY", default="")
     tiingo_api_key: str = Field(alias="TIINGO_API_KEY", default="")
     fmp_api_key: str = Field(alias="FMP_API_KEY", default="")
+    gildata_token: str = Field(alias="GILDATA_TOKEN", default="")
+    gildata_base_url: str = Field(
+        alias="GILDATA_BASE_URL",
+        default="https://api.gildata.com/mcp-servers/aidata-assistant-srv-rawapi",
+    )
     fred_api_key: str = Field(alias="FRED_API_KEY", default="")
     vibe_trading_iwencai_key: str = Field(alias="VIBE_TRADING_IWENCAI_KEY", default="")
     vibe_trading_sec_ua: str = Field(alias="VIBE_TRADING_SEC_UA", default="")
@@ -227,12 +235,15 @@ class DataConfig(_EnvBase):
     market_data_order_india_equity: str = Field(alias="MARKET_DATA_ORDER_INDIA_EQUITY", default="")
     market_data_order_kr_equity: str = Field(alias="MARKET_DATA_ORDER_KR_EQUITY", default="")
     market_data_order_ca_equity: str = Field(alias="MARKET_DATA_ORDER_CA_EQUITY", default="")
+    market_data_order_ar_equity: str = Field(alias="MARKET_DATA_ORDER_AR_EQUITY", default="")
+    market_data_order_uk_equity: str = Field(alias="MARKET_DATA_ORDER_UK_EQUITY", default="")
     market_data_order_vietnam_equity: str = Field(alias="MARKET_DATA_ORDER_VIETNAM_EQUITY", default="")
     market_data_order_crypto: str = Field(alias="MARKET_DATA_ORDER_CRYPTO", default="")
     market_data_order_futures: str = Field(alias="MARKET_DATA_ORDER_FUTURES", default="")
     market_data_order_fund: str = Field(alias="MARKET_DATA_ORDER_FUND", default="")
     market_data_order_macro: str = Field(alias="MARKET_DATA_ORDER_MACRO", default="")
     market_data_order_forex: str = Field(alias="MARKET_DATA_ORDER_FOREX", default="")
+    market_data_order_index: str = Field(alias="MARKET_DATA_ORDER_INDEX", default="")
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +431,9 @@ class AgentTuningConfig(_EnvBase):
     )
     vibe_trading_enable_scheduler: EnvBool = Field(
         alias="VIBE_TRADING_ENABLE_SCHEDULER", default=False,
+    )
+    vibe_contextual_identity_constraints: EnvBool = Field(
+        alias="VIBE_CONTEXTUAL_IDENTITY_CONSTRAINTS", default=True,
     )
     vibe_trading_scheduler_max_consecutive_failures: int = Field(
         alias="VIBE_TRADING_SCHEDULER_MAX_CONSECUTIVE_FAILURES", default=3,
