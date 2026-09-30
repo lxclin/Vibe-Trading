@@ -8,7 +8,9 @@ when this run never obtained either prices or company financials.
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 from typing import Any, Sequence
+from zoneinfo import ZoneInfo
 
 
 _BUY_QUESTION_RE = re.compile(
@@ -59,6 +61,75 @@ _VALUATION_BENCHMARK_RE = re.compile(
 _WAIT = ("暂不买入", "暂缓买入", "等待", "观望", "暂不考虑买入", "wait", "watch")
 _AVOID = ("不值得买入", "回避", "避免买入", "avoid", "unfavorable")
 _FAVORABLE = ("可考虑买入", "值得买入", "可以买入", "favorable", "consider buying")
+_PROFIT_FIELDS = frozenset({"PARENTNETPROFIT", "PARENT_NETPROFIT", "NETPROFIT", "EPSJB"})
+_OPERATING_CASH_FIELDS = frozenset({"NETCASH_OPERATE", "NETCASH_OPERATE_PK"})
+_MAX_REPORT_AGE_DAYS = 270
+
+
+def _latest_financial_fact(records: Sequence[Any], symbol: str, fields: frozenset[str]) -> Any | None:
+    """Return a relevant numeric fact from the latest reported period."""
+    candidates = [
+        record for record in records
+        if record.tool == "get_financial_statements"
+        and record.symbol == symbol
+        and record.status == "observed"
+        and isinstance(record.value, (int, float))
+        and re.search(r"\.periods\[0\]\.[^.]+$", record.field)
+        and record.field.rsplit(".", 1)[-1].upper() in fields
+    ]
+    return max(candidates, key=lambda record: record.timestamp or "") if candidates else None
+
+
+def decision_coverage(
+    records: Sequence[Any], symbol: str, attempts: Sequence[Any] = (),
+) -> dict[str, Any]:
+    """Summarize observed research inputs separately from attempted retrievals."""
+    quotes = [
+        record for record in records
+        if record.tool == "get_a_share_valuation" and record.symbol == symbol
+        and record.status == "observed"
+    ]
+    quote = next((record for record in quotes if record.field == "data.last_price"
+                  and isinstance(record.value, (int, float)) and record.value > 0), None)
+    multiple = next((record for record in quotes if record.field in {"data.pe_ttm", "data.pb"}
+                     and isinstance(record.value, (int, float)) and record.value > 0), None)
+    profit = _latest_financial_fact(records, symbol, _PROFIT_FIELDS)
+    cash = _latest_financial_fact(records, symbol, _OPERATING_CASH_FIELDS)
+    relevant_attempts = [
+        attempt for attempt in attempts
+        if isinstance(attempt, dict) and attempt.get("symbol") == symbol
+    ]
+    def slot(record: Any | None, tool: str, statement: str | None = None) -> dict[str, Any]:
+        matching = [attempt for attempt in relevant_attempts if attempt.get("tool") == tool
+                    and (statement is None or attempt.get("statement") == statement)]
+        return {
+            "status": "observed" if record is not None else ("unavailable" if matching else "unchecked"),
+            "field": record.field if record is not None else None,
+            "as_of": record.timestamp if record is not None else None,
+            "source": record.source if record is not None else None,
+            "report_period": getattr(record, "report_period", None) if record is not None else None,
+            "attempted": bool(matching) or record is not None,
+            "quarter_attempted": any(attempt.get("period") == "quarter" for attempt in matching),
+        }
+    coverage = {
+        "symbol": symbol,
+        "raw_quote": slot(quote, "get_a_share_valuation"),
+        "valuation_multiple": slot(multiple, "get_a_share_valuation"),
+        "profitability": slot(profit, "get_financial_statements", "indicators"),
+        "operating_cash_flow": slot(cash, "get_financial_statements", "cashflow"),
+    }
+    for key in ("profitability", "operating_cash_flow"):
+        as_of = coverage[key]["as_of"]
+        if not as_of:
+            continue
+        try:
+            report_date = date.fromisoformat(as_of[:10])
+        except ValueError:
+            coverage[key]["freshness"] = "unknown"
+            continue
+        age = (datetime.now(ZoneInfo("Asia/Shanghai")).date() - report_date).days
+        coverage[key]["freshness"] = "stale" if age > _MAX_REPORT_AGE_DAYS else "current"
+    return coverage
 
 
 def is_single_buy_question(question: str) -> bool:
@@ -74,6 +145,8 @@ def decision_guidance(chinese: bool) -> str:
         return (
             "[单一标的买入研究] 先确认标的和持有期限；用户未给期限时明确采用未来6—12个月作为分析假设。"
             "沪深A股先调用get_a_share_valuation取得未复权报价、时点、同口径PE/PB和市值，再取最新财报；"
+            "财报优先取get_financial_statements的quarter/indicators与quarter/cashflow，核对报告期、归母利润和经营现金流。"
+            "如果同一工具结果已经包含这些字段，可以复用；若缺少要如实列为证据缺口。"
             "get_market_data复权日线只用于走势，不能直接除以未复权EPS或每股净资产。"
             "评估估值、盈利/现金流与主要风险；算过但不采用的估值要说明口径原因。"
             "周期股不能只凭半年EPS乘二认定便宜；核对商品价格、正常化盈利及可比估值，取不到就列明缺口。"
@@ -89,6 +162,9 @@ def decision_guidance(chinese: bool) -> str:
         "[Single-instrument entry research] State the instrument and assumed horizon "
         "(default 6-12 months if unspecified). For a Shanghai/Shenzhen equity, call "
         "get_a_share_valuation for an unadjusted quote, as-of time, PE/PB and market cap. "
+        "Retrieve quarterly indicators and cash-flow statements, checking report dates, "
+        "parent profit and operating cash flow. Reuse fields already returned by a tool; "
+        "name genuinely missing items as evidence gaps. "
         "Use adjusted get_market_data bars for trends only, never as the numerator "
         "of PE/PB against unadjusted per-share accounts. Obtain the latest financial "
         "statements; assess valuation, earnings/cash flow and key risks. "
@@ -127,6 +203,7 @@ def decision_issues(
     records: Sequence[Any],
     primary_symbols: set[str],
     tool_failures: Sequence[Any] = (),
+    attempts: Sequence[Any] = (),
 ) -> list[dict[str, Any]]:
     """Require a directional, time-bound research view with minimum evidence."""
     issues: list[dict[str, Any]] = []
@@ -177,24 +254,23 @@ def decision_issues(
             for record in records
         )
         has_financials = any(
-            record.status == "observed"
-            and record.symbol == symbol
-            and record.tool == "get_financial_statements"
-            and record.value is not None
+            record.status == "observed" and record.symbol == symbol
+            and record.tool == "get_financial_statements" and record.value is not None
             and ".periods[" in record.field
-            and not record.field.endswith((".REPORT_YEAR", ".REPORT_DATE"))
             for record in records
         )
-        mainland_equity = symbol.endswith((".SH", ".SZ")) and not symbol.startswith(
+        mainland_equity = symbol.endswith((".SH", ".SZ", ".BJ")) and not symbol.startswith(
             ("5", "1")
         )
         quote_records = [
             record for record in records
             if record.tool == "get_a_share_valuation" and record.symbol == symbol
         ]
-        quote_attempted = bool(quote_records) or any(
-            failure.get("tool") == "get_a_share_valuation"
-            for failure in tool_failures if isinstance(failure, dict)
+        quote_attempted = bool(quote_records) or (
+            not attempts and any(
+                failure.get("tool") == "get_a_share_valuation"
+                for failure in tool_failures if isinstance(failure, dict)
+            )
         )
         has_raw_quote = any(
             record.status == "observed"
@@ -211,6 +287,50 @@ def decision_issues(
             and record.value > 0
             for record in quote_records
         )
+        coverage = decision_coverage(records, symbol, attempts) if mainland_equity else None
+        if coverage is not None:
+            profit = coverage["profitability"]
+            cash = coverage["operating_cash_flow"]
+            has_financials = profit["status"] == "observed"
+            quote_attempted = coverage["raw_quote"]["attempted"] or quote_attempted
+            if profit["status"] == "unchecked":
+                issue(
+                    "decision_profitability_not_checked",
+                    f"Call get_financial_statements(code=\"{symbol}\", statement=\"indicators\", period=\"quarter\") to check latest profitability and its report date.",
+                )
+            if cash["status"] == "unchecked":
+                issue(
+                    "decision_cash_flow_not_checked",
+                    f"Call get_financial_statements(code=\"{symbol}\", statement=\"cashflow\", period=\"quarter\") to check operating cash flow and its report date.",
+                )
+            if profit["status"] != "observed":
+                if stance == "favorable":
+                    issue("decision_profitability_missing", "A favorable buy view requires observed latest-period profitability, not just any financial field.")
+                if confidence not in {"低", "low"}:
+                    issue("decision_confidence_overstated", "Profitability was not observed; use low confidence and name the gap.")
+            if cash["status"] != "observed":
+                if stance == "favorable":
+                    issue("decision_cash_flow_missing", "A favorable buy view requires observed operating cash flow or a clearly sourced substitute.")
+                if confidence not in {"低", "low"}:
+                    issue("decision_confidence_overstated", "Operating cash flow was not observed; use low confidence and name the gap.")
+            for label, slot in (("profitability", profit), ("operating cash flow", cash)):
+                if slot["report_period"] == "annual" and not slot["quarter_attempted"]:
+                    issue(
+                        "decision_quarterly_financials_not_checked",
+                        f"Only annual {label} was observed. Check the latest quarterly report before an entry judgment.",
+                    )
+                if slot.get("freshness") == "stale":
+                    if stance == "favorable":
+                        issue("decision_stale_financials", f"The latest observed {label} is more than {_MAX_REPORT_AGE_DAYS} days old; do not give a favorable entry verdict without current financials.")
+                    if confidence not in {"低", "low"}:
+                        issue("decision_confidence_overstated", f"The latest observed {label} is stale; use low confidence.")
+                if slot["status"] == "observed" and slot["as_of"]:
+                    date_text = slot["as_of"][:10]
+                    localized = date_text.replace("-", "年", 1).replace("-", "月", 1) + "日"
+                    if date_text not in content and localized not in content:
+                        issue("decision_report_date_omitted", f"State the report period {date_text} for observed {label} figures.")
+            if (profit["status"] != "observed" or cash["status"] != "observed") and not _MISSING_RE.search(content):
+                issue("decision_missing_data_unspecified", "Name the missing profitability or cash-flow evidence explicitly.")
         if mainland_equity and not quote_attempted:
             issue(
                 "decision_raw_valuation_not_checked",

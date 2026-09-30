@@ -27,7 +27,7 @@ from src.agent.grounding.identity_scope import (
     _TRADE_MANAGEMENT_FOLLOWUP_RE,
 )
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
-from src.agent.grounding.decision import decision_issues, is_single_buy_question
+from src.agent.grounding.decision import decision_coverage, decision_issues, is_single_buy_question
 from src.agent.grounding.figures import parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
 from src.agent.grounding.release import (
@@ -144,6 +144,7 @@ class GroundingLedger(
         )
         self._evidence: list[EvidenceRecord] = []
         self._tool_failures: list[dict[str, Any]] = []
+        self._decision_tool_attempts: list[dict[str, Any]] = []
         self._analysis_completed: list[dict[str, Any]] = []
         self._analysis_metrics: list[dict[str, Any]] = []
         self._validations: list[dict[str, Any]] = []
@@ -364,6 +365,23 @@ class GroundingLedger(
             success: Result-envelope success classification.
         """
         payload = _json_object(result)
+        if self._decision_required and tool_name in {
+            "get_a_share_valuation", "get_financial_statements"
+        }:
+            self._decision_tool_attempts.append({
+                "call_id": call_id,
+                "tool": tool_name,
+                "symbol": _normalize_symbol(arguments.get("code")),
+                "statement": (
+                    str(arguments.get("statement") or "indicators")
+                    if tool_name == "get_financial_statements" else None
+                ),
+                "period": (
+                    str(arguments.get("period") or "annual")
+                    if tool_name == "get_financial_statements" else None
+                ),
+                "success": success,
+            })
         if not success:
             self._record_tool_failure(tool_name, call_id, result)
             if tool_name == _RESOLVER_TOOL:
@@ -455,7 +473,8 @@ class GroundingLedger(
             issues.extend(self._validate_figures(content, block, figures))
             if self._decision_required and self.identity_status == "locked":
                 issues.extend(decision_issues(
-                    content, self._evidence, self.primary_symbols, self._tool_failures
+                    content, self._evidence, self.primary_symbols, self._tool_failures,
+                    self._decision_tool_attempts,
                 ))
         issues = self._dedupe_issues(issues)
         result = ValidationResult(
@@ -485,6 +504,7 @@ class GroundingLedger(
             artifact_dir.mkdir(parents=True, exist_ok=True)
             path = artifact_dir / GROUNDING_ARTIFACT
             temp = path.with_suffix(path.suffix + ".tmp")
+            primary = next(iter(self.primary_symbols)) if len(self.primary_symbols) == 1 else None
             payload = {
                 "schema_version": 1,
                 "updated_at": _utc_now(),
@@ -493,6 +513,17 @@ class GroundingLedger(
                 "session_symbol_roots": sorted(self._session_symbol_roots),
                 "evidence": [asdict(record) for record in self._evidence],
                 "tool_failures": list(self._tool_failures),
+                "decision_tool_attempts": list(self._decision_tool_attempts),
+                "research_coverage": (
+                    decision_coverage(
+                        self._evidence, primary,
+                        self._decision_tool_attempts,
+                    )
+                    if self._decision_required and primary is not None
+                    and primary.endswith((".SH", ".SZ", ".BJ"))
+                    and not primary.startswith(("5", "1"))
+                    else None
+                ),
                 "analysis_completed": list(self._analysis_completed),
                 "analysis_evidence": list(self._analysis_metrics),
                 "validations": list(self._validations),

@@ -455,6 +455,8 @@ class EvidenceRecord:
     venue: str | None = None
     currency_conversion: str | None = None
     adjustment: str | None = None
+    statement: str | None = None
+    report_period: str | None = None
 
 
 def _is_price_kind(record: EvidenceRecord) -> bool:
@@ -776,6 +778,14 @@ class _EvidenceMixin:
         source = str(payload.get("source") or tool_name)
         remaining = _MAX_GENERIC_EVIDENCE
         timestamp_fields = (*_TIMESTAMP_FIELDS, "as_of", "report_date")
+        statement = (
+            str(payload.get("statement") or arguments.get("statement") or "")
+            if tool_name == "get_financial_statements" else None
+        )
+        report_period = (
+            str(payload.get("period") or arguments.get("period") or "")
+            if tool_name == "get_financial_statements" else None
+        )
 
         def visit(value: Any, path: str, timestamp: str | None = None) -> None:
             nonlocal remaining
@@ -794,16 +804,21 @@ class _EvidenceMixin:
                         status="observed",
                         currency=_infer_currency(symbol or ""),
                         venue=_infer_venue(symbol or ""),
+                        statement=statement,
+                        report_period=report_period,
                     )
                 )
                 remaining -= 1
                 return
             if isinstance(value, dict):
+                # Eastmoney financial rows use REPORT_DATE, while most other
+                # tools use lowercase keys. Preserve the period on each fact.
+                dated = {str(key).casefold(): item for key, item in value.items()}
                 local_timestamp = next(
                     (
-                        str(value[key])
+                        str(dated[key])
                         for key in timestamp_fields
-                        if value.get(key) is not None
+                        if dated.get(key) is not None
                     ),
                     timestamp,
                 )
