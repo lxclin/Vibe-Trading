@@ -139,8 +139,12 @@ class Trigger:
         epoch_ms: INTERVAL only — the phase anchor (epoch ms) the cadence is
             measured from. Defaults to 0 (UNIX epoch) so the schedule is stable
             across restarts.
-        market: MARKET only — a key into :data:`MARKET_SPECS` (e.g.
+        market_key: MARKET only — a key into :data:`MARKET_SPECS` (e.g.
             ``"us_equity"``). The trigger is "due" whenever that market is open.
+            Named ``market_key`` (not ``market``) so the :meth:`market`
+            classmethod constructor does not shadow the field default — a
+            dataclass field and a same-named classmethod would otherwise make
+            the field default a bound method instead of ``None``.
         predicate: EVENT only — a pure callable evaluated against an
             event-state mapping supplied by the runner/event source. It returns
             ``True`` when the awaited condition (price crossing, fill, etc.) is
@@ -153,7 +157,7 @@ class Trigger:
     kind: TriggerKind
     interval_ms: int = 0
     epoch_ms: int = 0
-    market: str | None = None
+    market_key: str | None = None
     predicate: Callable[[Mapping[str, object]], bool] | None = None
 
     @classmethod
@@ -189,7 +193,7 @@ class Trigger:
         """
         if market not in MARKET_SPECS:
             raise ValueError(f"unknown market: {market!r}")
-        return cls(kind=TriggerKind.MARKET, market=market)
+        return cls(kind=TriggerKind.MARKET, market_key=market)
 
     @classmethod
     def event(cls, predicate: Callable[[Mapping[str, object]], bool]) -> "Trigger":
@@ -287,9 +291,9 @@ def due_now(trigger: Trigger, now_ms: int, *, event_state: Mapping[str, object] 
         return elapsed >= 0 and elapsed % trigger.interval_ms == 0
 
     if trigger.kind is TriggerKind.MARKET:
-        if trigger.market is None:
+        if trigger.market_key is None:
             raise ValueError("market trigger requires a market")
-        return market_is_open_at(trigger.market, now_ms)
+        return market_is_open_at(trigger.market_key, now_ms)
 
     if trigger.kind is TriggerKind.EVENT:
         if trigger.predicate is None:

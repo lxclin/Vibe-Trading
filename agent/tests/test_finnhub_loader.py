@@ -7,7 +7,7 @@ namespace, so we monkeypatch that name on the ``finnhub_loader`` module.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pandas as pd
 

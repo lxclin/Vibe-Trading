@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -18,12 +17,6 @@ import src.live.paths as paths
 from src.live.halt import trip_halt
 from src.live.mandate.model import (
     MANDATE_SCHEMA_VERSION,
-    AssetClass,
-    ConsentMeta,
-    HardCaps,
-    InstrumentType,
-    Mandate,
-    UniverseConstraint,
 )
 from src.live.order_guard import LiveOrderGuardTool
 from src.tools.mcp import MCPRemoteTool, MCPRemoteToolSpec

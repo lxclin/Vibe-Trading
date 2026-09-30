@@ -32,7 +32,6 @@ from src.trading.connectors.okx.classification import OKX_TOOL_CLASS
 from src.trading.connectors.shoonya import sdk as sh
 from src.trading.connectors.shoonya.classification import SHOONYA_TOOL_CLASS
 from src.trading.connectors.etoro import client as etoro_client
-from src.trading.connectors.etoro.classification import ETORO_TOOL_CLASS
 from src.trading.connectors.tiger import sdk as tg
 from src.trading.connectors.tiger.classification import TIGER_TOOL_CLASS
 

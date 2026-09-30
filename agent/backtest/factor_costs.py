@@ -45,13 +45,12 @@ SIGN AND UNIT CONVENTIONS
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from src.quantlib.impact import DEFAULT_SLIPPAGE_BPS, linear_impact, sqrt_impact
+from src.quantlib.impact import DEFAULT_SLIPPAGE_BPS
 
 __all__ = [
     "DEFAULT_MAX_PARTICIPATION",

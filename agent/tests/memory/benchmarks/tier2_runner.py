@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
@@ -27,16 +27,13 @@ from src.memory.search_index import MemorySearchIndex
 from src.memory.semantic_links import (
     SemanticLinker,
     _tokenize_for_bm25,
-    compute_bm25_score,
     compute_idf,
 )
-from src.memory.compression import CompressionPipeline, _tokenize_for_tfidf
+from src.memory.compression import CompressionPipeline
 from src.memory.hierarchy import CATEGORIES, MemoryHierarchy
 
 from .metrics import mean_reciprocal_rank, ndcg_at_k, precision_at_k
 from .runner import (
-    MemoryRecord,
-    QueryRecord,
     load_corpus,
     load_queries,
     retrieve_top_k,

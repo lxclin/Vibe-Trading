@@ -236,7 +236,6 @@ def test_cli_connector_check_passes_account_to_backend() -> None:
 
 def test_quote_waits_for_delayed_tick_arrival(monkeypatch: pytest.MonkeyPatch) -> None:
     """get_quote polls with ib.sleep() until the ticker receives real data."""
-    import math
     from types import SimpleNamespace
 
     pump_count = [0]
@@ -279,7 +278,6 @@ def test_quote_waits_for_delayed_tick_arrival(monkeypatch: pytest.MonkeyPatch) -
 
 def test_quote_keeps_polling_when_ticker_is_nan(monkeypatch: pytest.MonkeyPatch) -> None:
     """get_quote rejects NaN fields and continues polling for real data."""
-    import math
     from types import SimpleNamespace
 
     pump_count = [0]

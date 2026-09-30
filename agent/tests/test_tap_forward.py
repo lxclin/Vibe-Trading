@@ -132,7 +132,7 @@ def test_approved_write_polls_until_forwarded(tap_env, monkeypatch) -> None:
         json.dumps({"status": "forwarded",
                     "response": {"status": 200, "body": '{"id": "ord-1"}'}}),
     ])
-    result = tf.forward(f"https://api.example/v2/orders", "POST", "{}", _CRED, timeout=30)
+    result = tf.forward("https://api.example/v2/orders", "POST", "{}", _CRED, timeout=30)
 
     assert result["ok"] is True
     assert result["decision"] == "forwarded"

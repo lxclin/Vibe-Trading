@@ -295,8 +295,8 @@ def _assert_profile(cfg: MT5Config, account: Any, mt5: Any) -> None:
     terminal_login = getattr(account, "login", None)
     if cfg.login and terminal_login is not None and int(terminal_login) != cfg.login:
         raise MT5ProfileMismatchError(
-            f"login pin mismatch: profile is configured for a different account than "
-            f"the terminal's — refusing (fail-closed)."
+            f"login mismatch: profile {cfg.profile!r} is configured for a different "
+            f"account than the terminal's — refusing (fail-closed)."
         )
 
 

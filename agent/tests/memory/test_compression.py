@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
 
 from src.memory.compression import (
     DAILY_THRESHOLD_DAYS,
@@ -15,7 +14,6 @@ from src.memory.compression import (
     LEVEL_RAW,
     CompressionPipeline,
     compute_tfidf,
-    _tokenize_for_tfidf,
 )
 
 

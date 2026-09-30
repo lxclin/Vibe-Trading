@@ -1414,6 +1414,44 @@ export function Agent() {
     }
   }, [llmSettings, modelSwitching, status, t]);
 
+  const updateChatGptConfig = useCallback(async (
+    modelName: string,
+    reasoningEffort: "" | "none" | "low" | "medium" | "high" | "max",
+  ) => {
+    if (
+      !llmSettings
+      || llmSettings.provider !== "openai-codex"
+      || modelSwitching
+      || status === "streaming"
+    ) return;
+    const provider = llmSettings.providers.find((item) => item.name === "openai-codex");
+    if (!provider) {
+      toast.error(t("agent.modelSwitchUnavailable"));
+      return;
+    }
+    setModelSwitching(true);
+    try {
+      const updated = await api.updateLLMSettings({
+        provider: "openai-codex",
+        model_name: modelName,
+        base_url: provider.default_base_url,
+        temperature: llmSettings.temperature,
+        timeout_seconds: llmSettings.timeout_seconds,
+        max_retries: llmSettings.max_retries,
+        reasoning_effort: reasoningEffort,
+      });
+      sseTimeoutMsRef.current = updated.sse_timeout_seconds * 1000;
+      setLlmSettings(updated);
+      toast.success(t("agent.modelSwitched", { provider: "ChatGPT" }));
+    } catch (error) {
+      toast.error(t("agent.modelSwitchFailed", {
+        message: error instanceof Error ? error.message : t("settings.unknownError"),
+      }));
+    } finally {
+      setModelSwitching(false);
+    }
+  }, [llmSettings, modelSwitching, status, t]);
+
   /* Safety timeout: if streaming but no SSE event for sseTimeoutMsRef.current ms, reset to idle */
   useEffect(() => {
     if (status !== "streaming") return;
@@ -1819,6 +1857,14 @@ export function Agent() {
         switching={modelSwitching}
         switchDisabled={status === "streaming"}
         onProviderSwitch={switchChatProvider}
+        onChatGptModelChange={(modelName) => updateChatGptConfig(
+          modelName,
+          (llmSettings?.reasoning_effort ?? "") as "" | "none" | "low" | "medium" | "high" | "max",
+        )}
+        onReasoningEffortChange={(reasoningEffort) => updateChatGptConfig(
+          llmSettings?.model_name ?? "openai-codex/gpt-5.6-sol",
+          reasoningEffort,
+        )}
       />
       <div
         ref={listRef}

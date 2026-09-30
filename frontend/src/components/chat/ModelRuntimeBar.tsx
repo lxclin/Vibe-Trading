@@ -2,6 +2,12 @@ import { Cpu, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { LLMSettings } from "@/lib/api";
 
+type OpenAICodexModel =
+  | "openai-codex/gpt-5.6-sol"
+  | "openai-codex/gpt-5.6-luna"
+  | "openai-codex/gpt-6-sol"
+  | "openai-codex/gpt-6-luna";
+
 interface Props {
   settings: LLMSettings | null;
   runtimeProvider?: string;
@@ -10,6 +16,8 @@ interface Props {
   switching?: boolean;
   switchDisabled?: boolean;
   onProviderSwitch?: (provider: "deepseek" | "openai-codex") => void;
+  onChatGptModelChange?: (model: OpenAICodexModel) => void;
+  onReasoningEffortChange?: (effort: "" | "none" | "low" | "medium" | "high" | "max") => void;
 }
 
 export function ModelRuntimeBar({
@@ -20,6 +28,8 @@ export function ModelRuntimeBar({
   switching = false,
   switchDisabled = false,
   onProviderSwitch,
+  onChatGptModelChange,
+  onReasoningEffortChange,
 }: Props) {
   const { t } = useTranslation();
   if (!settings) return null;
@@ -40,6 +50,18 @@ export function ModelRuntimeBar({
     : settings.reasoning_effort;
   const effortLabel = effortLabels[reasoningEffort] || t("settings.providerDefault");
   const configuredProvider = settings.provider === "openai-codex" ? "openai-codex" : "deepseek";
+  const knownChatGptModel = (
+    [
+      "openai-codex/gpt-5.6-sol",
+      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-6-sol",
+      "openai-codex/gpt-6-luna",
+    ] as const
+  ).includes(settings.model_name as OpenAICodexModel);
+  const chatGptModel = settings.model_name;
+  const selectableEffort = ["", "none", "low", "medium", "high", "max"].includes(settings.reasoning_effort)
+    ? settings.reasoning_effort
+    : "";
   const canSwitch = Boolean(
     onProviderSwitch
     && settings.providers.some((item) => item.name === "deepseek")
@@ -48,7 +70,7 @@ export function ModelRuntimeBar({
 
   return (
     <div className="shrink-0 border-b border-border/70 bg-background/95 px-6 py-2 backdrop-blur-sm">
-      <div className="mx-auto flex max-w-3xl items-center gap-2 overflow-hidden text-xs">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 text-xs sm:flex-nowrap">
         <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
           <span className="absolute inline-flex h-full w-full rounded-full bg-success/30" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
@@ -89,6 +111,41 @@ export function ModelRuntimeBar({
               );
             })}
           </div>
+        )}
+        {configuredProvider === "openai-codex" && onChatGptModelChange && (
+          <select
+            aria-label={`${t("settings.modelName")} ChatGPT`}
+            title={t("settings.modelName")}
+            value={chatGptModel}
+            disabled={switchDisabled || switching}
+            onChange={(event) => onChatGptModelChange(event.target.value as OpenAICodexModel)}
+            className="h-6 shrink-0 rounded-md border border-border/70 bg-background px-1.5 text-[10px] text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {!knownChatGptModel && <option value={chatGptModel}>{chatGptModel}</option>}
+            <option value="openai-codex/gpt-5.6-sol">5.6 Sol</option>
+            <option value="openai-codex/gpt-5.6-luna">5.6 Luna</option>
+            <option value="openai-codex/gpt-6-sol">6 Sol</option>
+            <option value="openai-codex/gpt-6-luna">6 Luna</option>
+          </select>
+        )}
+        {configuredProvider === "openai-codex" && onReasoningEffortChange && (
+          <select
+            aria-label={t("settings.reasoningEffort")}
+            title={t("settings.reasoningEffort")}
+            value={selectableEffort}
+            disabled={switchDisabled || switching}
+            onChange={(event) => onReasoningEffortChange(
+              event.target.value as "" | "none" | "low" | "medium" | "high" | "max",
+            )}
+            className="h-6 shrink-0 rounded-md border border-border/70 bg-background px-1.5 text-[10px] text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="">{t("settings.providerDefault")}</option>
+            <option value="none">{effortLabels.none}</option>
+            <option value="low">{effortLabels.low}</option>
+            <option value="medium">{effortLabels.medium}</option>
+            <option value="high">{effortLabels.high}</option>
+            <option value="max">{effortLabels.max}</option>
+          </select>
         )}
         <span className={[
           "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-muted/35 px-2 py-0.5 text-[10px] text-muted-foreground",

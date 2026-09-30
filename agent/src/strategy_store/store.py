@@ -12,7 +12,6 @@ backends.
 
 from __future__ import annotations
 
-import copy
 import threading
 import uuid
 from dataclasses import replace
@@ -27,7 +26,6 @@ from src.strategy_store.models import (
     ArtifactType,
     BenchResult,
     DecaySnapshot,
-    DecaySignal,
     ValidationStatus,
     validate_validation_status_transition,
 )

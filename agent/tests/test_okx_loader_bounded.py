@@ -9,7 +9,7 @@ Tests mock the session or the helper that creates it.
 from __future__ import annotations
 
 import importlib
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest

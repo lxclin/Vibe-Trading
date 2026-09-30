@@ -77,6 +77,7 @@ def test_interactive_onboard_codex_defaults_to_supported_model() -> None:
     assert provider.key_env is None
     assert provider.base_env == "OPENAI_CODEX_BASE_URL"
     assert provider.suggested_models[0] == "openai-codex/gpt-5.6-sol"
+    assert "openai-codex/gpt-5.6-luna" in provider.suggested_models
 
 
 def test_legacy_cli_provider_choices_match_registry_defaults() -> None:

@@ -5,7 +5,6 @@ low-turnover one is not. A cost model that charges everyone equally, or charges
 nobody, would pass a suite that only checked "cost >= 0".
 """
 
-import numpy as np
 import pandas as pd
 import pytest
 

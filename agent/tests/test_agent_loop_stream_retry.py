@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-import pytest
 
 import src.agent.loop as loop_mod
 from src.providers.chat import LLMResponse, ProviderStreamError

@@ -19,11 +19,6 @@ import pytest
 from backtest.engines.china_futures import (
     ChinaFuturesEngine,
     _extract_product,
-    _MULTIPLIER,
-    _MARGIN_RATE,
-    _COMMISSION,
-    _PRICE_LIMIT,
-    _DEFAULT_PRICE_LIMIT,
 )
 from backtest.models import Position
 

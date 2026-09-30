@@ -649,10 +649,15 @@ def test_crypto_request_rejects_listed_security_resolution(tmp_path: Path) -> No
     unsafe = ledger.validate_final_answer(
         "无法确认唯一交易对，但仍建议买入，买入价 10 USD。"
     )
+    unsafe_direction = ledger.validate_final_answer(
+        "无法确认唯一交易对，但预计后市看涨，现价 10 USD。"
+    )
 
     assert safe.valid is True
     assert unsafe.valid is False
     assert any(issue["code"] == "identity_not_locked" for issue in unsafe.issues)
+    assert unsafe_direction.valid is False
+    assert any(issue["code"] == "identity_not_locked" for issue in unsafe_direction.issues)
     fallback = ledger.safe_fallback()
     assert "SKHY.US" in fallback
     assert "具体平台" in fallback
@@ -2068,10 +2073,10 @@ def test_numeric_gate_allows_explicitly_unverified_aggregate_quotes(tmp_path: Pa
     assert ledger.validate_final_answer(draft).valid is True
 
 
-def test_numeric_gate_allows_dated_prior_close_when_live_quote_is_missing(
+def test_numeric_gate_rejects_unsourced_dated_prior_close_when_live_quote_is_missing(
     tmp_path: Path,
 ) -> None:
-    """A dated prior close must not erase a useful follow-up report."""
+    """A historical price still needs evidence, even when clearly dated."""
     ledger = GroundingLedger(
         run_dir=tmp_path,
         user_message="我刚刚142买入了100usdt的SKHYB/USDT，后面该做什么",
@@ -2082,7 +2087,9 @@ def test_numeric_gate_allows_dated_prior_close_when_live_quote_is_missing(
         "请以 Binance SKHYB/USDT 页面为准。"
     )
 
-    assert ledger.validate_final_answer(draft).valid is True
+    result = ledger.validate_final_answer(draft)
+    assert result.valid is False
+    assert any(issue["code"] == "numeric_claim_unavailable" for issue in result.issues)
 
 
 def test_safe_fallback_names_locked_symbol_when_live_evidence_is_missing(
@@ -2258,10 +2265,10 @@ def test_labelled_peer_in_latest_price_table_uses_its_own_evidence(
     assert result.valid is True, result.issues
 
 
-def test_unlabelled_multi_instrument_levels_match_observed_union(
+def test_unlabelled_multi_instrument_levels_cannot_pose_as_observed_union(
     tmp_path: Path,
 ) -> None:
-    """Long comparison prose must not force every unlabelled level onto primary."""
+    """A proposed trigger needs a declared role and support from evidence."""
     ledger = GroundingLedger(run_dir=tmp_path, user_message="513330.SH是否值得买入")
     ledger.ingest_tool_result(
         tool_name="get_market_data",
@@ -2296,7 +2303,8 @@ def test_unlabelled_multi_instrument_levels_match_observed_union(
         "若腾讯企稳（收盘收复 456.2）则继续观察。"
     )
 
-    assert result.valid is True, result.issues
+    assert result.valid is False
+    assert any(issue["code"] == "numeric_claim_conflict" for issue in result.issues)
 
 
 def test_explicit_symbol_still_rejects_another_instruments_observed_price(

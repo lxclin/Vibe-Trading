@@ -71,7 +71,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 __all__ = [

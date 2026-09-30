@@ -520,7 +520,6 @@ def get_historical_bars(
     finally:
         _pool.release()
 
-import itertools
 
 class _TwsPool:
     """Thread-local IB connection pool with per-thread reference counting.

@@ -1,8 +1,8 @@
 """Read-only symbol-search tool: resolve a name/ticker to symbols + market.
 
-Backed by the selected Binance connector for exact crypto pairs plus three
-frozen, IP-throttled public-API clients so the agent never hits a provider
-un-throttled and never re-implements transport plumbing:
+Backed by the selected Binance connector for exact crypto pairs, three
+frozen, IP-throttled public-API clients, and a last-resort exact-name lookup
+against mainland exchange stock lists:
 
 * The active Binance profile resolves exact spot-pair spellings against its
   exchange market catalog. It does not guess asset names from prose.
@@ -15,6 +15,8 @@ un-throttled and never re-implements transport plumbing:
   global tickers/company names (US, HK, Canada, crypto, indices, FX, ...).
 * :mod:`backtest.loaders.sec_edgar_client` — the SEC company-tickers table
   enriches a resolved U.S. equity ticker with its zero-padded CIK.
+* SSE and SZSE public stock lists — resolve an exact A-share name or code when
+  the suggestion providers return no candidates.
 
 The tool fans out across these sources, normalizes every hit into one compact
 candidate row in the project's symbol convention, de-duplicates by symbol, and
@@ -28,6 +30,8 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
+
+import requests
 
 from backtest.loaders import eastmoney_client, sec_edgar_client, yahoo_client
 from src.agent.tools import BaseTool
@@ -44,6 +48,7 @@ logger = logging.getLogger(__name__)
 # ready-made ``QuoteID`` secid. Requests route through the frozen, throttled
 # Eastmoney client; this is just the documented endpoint URL + query shape.
 _EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+_SSE_STOCK_LIST_URL = "https://query.sse.com.cn/sseQuery/commonQuery.do"
 
 # Canadian equity suffixes (TSX ``.TO`` / TSX Venture ``.V``). Eastmoney has NO
 # Canada coverage: querying it with a Canadian ticker returns a non-JSON body
@@ -188,7 +193,8 @@ class SymbolSearchTool(BaseTool):
         "crypto/index/FX from "
         "Yahoo). Exact crypto pairs are checked against the active Binance "
         "profile; other queries search Eastmoney (China/HK/US names and tickers) and Yahoo "
-        "(global) and, for U.S. equities, attaches the SEC CIK. Use this to turn "
+        "(global), with official Shanghai/Shenzhen stock lists as a fallback for exact A-share names/codes "
+        "and, for U.S. equities, attaches the SEC CIK. Use this to turn "
         "an ambiguous name into a concrete symbol before calling get_market_data "
         'or get_sec_filings. Example: search_symbol(query="apple", limit=5).'
     )
@@ -270,6 +276,10 @@ class SymbolSearchTool(BaseTool):
         fx_pair = _canonical_fx_pair(query)
         yh_hits, sources["yahoo"] = _search_yahoo(fx_pair or search_query)
         candidates.extend(yh_hits)
+        if not candidates and _may_be_mainland_stock(query, search_query):
+            official_hits, official_sources = _search_official_a_shares(search_query)
+            candidates.extend(official_hits)
+            sources.update(official_sources)
         if fx_pair is not None:
             pair_no_x = fx_pair[:-2]
             candidates.append(
@@ -637,6 +647,118 @@ def _is_ticker_name_query(query: str) -> bool:
     """
     tokens = (query or "").strip().split()
     return len(tokens) >= 2 and bool(re.fullmatch(r"[A-Z0-9&]{1,6}", tokens[0]))
+
+
+def _may_be_mainland_stock(query: str, search_query: str) -> bool:
+    """Limit the exchange-list fallback to plausible mainland stock queries."""
+    if re.search(r"\.(?:HK|US|TO|V)\b", query, re.IGNORECASE):
+        return False
+    return bool(re.search(r"[\u3400-\u9fff]", query)) or bool(
+        re.fullmatch(r"[0368]\d{5}", search_query)
+    )
+
+
+def _official_stock_candidate(
+    code: Any, name: Any, suffix: str, source: str
+) -> Optional[Dict[str, Any]]:
+    """Normalize one exchange listing without inferring a venue from the code."""
+    code_text = str(code or "").strip()
+    name_text = str(name or "").strip()
+    if not re.fullmatch(r"\d{6}", code_text) or not name_text:
+        return None
+    return {
+        "symbol": f"{code_text}.{suffix}",
+        "name": name_text,
+        "market": "cn",
+        "type": "listed_security",
+        "exchange": suffix,
+        "source": source,
+    }
+
+
+def _search_sse_stock_list(query: str, stock_type: str) -> List[Dict[str, Any]]:
+    """Look up an exact name/code in the Shanghai exchange's public stock list."""
+    response = requests.get(
+        _SSE_STOCK_LIST_URL,
+        params={
+            "STOCK_TYPE": stock_type,
+            "REG_PROVINCE": "",
+            "CSRC_CODE": "",
+            "STOCK_CODE": "",
+            "sqlId": "COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L",
+            "COMPANY_STATUS": "2,4,5,7,8",
+            "type": "inParams",
+            "isPagination": "true",
+            "pageHelp.cacheSize": "1",
+            "pageHelp.beginPage": "1",
+            "pageHelp.pageSize": "10000",
+            "pageHelp.pageNo": "1",
+            "pageHelp.endPage": "1",
+        },
+        headers={
+            "Host": "query.sse.com.cn",
+            "Pragma": "no-cache",
+            "Referer": "https://www.sse.com.cn/assortment/stock/list/share/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/81.0.4044.138 Safari/537.36"
+            ),
+        },
+        timeout=8,
+    )
+    response.raise_for_status()
+    rows = response.json().get("result")
+    if not isinstance(rows, list):
+        raise ValueError("Shanghai stock list has no result rows")
+    hits: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        candidate = _official_stock_candidate(
+            row.get("A_STOCK_CODE"), row.get("SEC_NAME_CN"), "SH", "sse"
+        )
+        if candidate and query in {candidate["symbol"].split(".")[0], candidate["name"]}:
+            hits.append(candidate)
+    return hits
+
+
+def _search_official_a_shares(query: str) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """Use exchange stock lists when name suggestion providers return nothing.
+
+    Exact matches only: a unique substring match is not proof of a listing's
+    identity. Shanghai is queried first because its official endpoint supports
+    a bounded HTTP timeout; Shenzhen is tried when Shanghai has no match.
+    """
+    sources: Dict[str, str] = {}
+    for stock_type in ("1", "8"):  # SSE main board, then STAR market
+        try:
+            hits = _search_sse_stock_list(query, stock_type)
+            sources["sse"] = "ok"
+            if hits:
+                return hits, sources
+        except Exception as exc:  # noqa: BLE001 - keep the next exchange available
+            sources["sse"] = f"sse stock list failed: {exc}"
+            logger.debug("sse stock list failed for %r: %s", query, exc)
+            break
+
+    try:
+        import akshare as ak
+
+        rows = ak.stock_info_sz_name_code(symbol="A股列表")
+        hits = []
+        for row in rows.to_dict("records"):
+            candidate = _official_stock_candidate(
+                row.get("A股代码"), row.get("A股简称"), "SZ", "szse"
+            )
+            if candidate and query in {candidate["symbol"].split(".")[0], candidate["name"]}:
+                hits.append(candidate)
+        sources["szse"] = "ok"
+        return hits, sources
+    except Exception as exc:  # noqa: BLE001 - source failure stays visible
+        sources["szse"] = f"szse stock list failed: {exc}"
+        logger.debug("szse stock list failed for %r: %s", query, exc)
+        return [], sources
 
 
 def _search_eastmoney(query: str) -> tuple[List[Dict[str, Any]], str]:

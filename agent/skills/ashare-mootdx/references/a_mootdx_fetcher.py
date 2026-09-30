@@ -8,7 +8,6 @@ Usage:
 import logging
 from mootdx.quotes import Quotes
 import pandas as pd
-from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 

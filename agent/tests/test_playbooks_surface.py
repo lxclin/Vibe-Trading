@@ -23,7 +23,7 @@ patching the route module's singleton (REST).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List
 
 import pytest
 from fastapi.testclient import TestClient

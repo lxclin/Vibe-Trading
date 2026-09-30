@@ -17,7 +17,6 @@ All helpers raise ``ValueError`` on rejection — callers already expect this.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from src.config.accessor import get_env_config

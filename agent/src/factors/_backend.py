@@ -22,7 +22,14 @@ from typing import Any
 # numpy sliding_window_view — always available (numpy >= 1.20)
 from numpy.lib.stride_tricks import sliding_window_view
 
-__all__ = ["HAS_BOTTLENECK", "bn", "sliding_window_view"]
+# ``HAS_BOTTLENECK`` and ``bn`` are resolved lazily via module-level
+# ``__getattr__`` (PEP 562) below, so ruff's F822 "undefined name in __all__"
+# is a false positive here.
+__all__ = [  # noqa: F822
+    "HAS_BOTTLENECK",
+    "bn",
+    "sliding_window_view",
+]
 
 # ---------------------------------------------------------------------------
 # Lazy bottleneck initialisation

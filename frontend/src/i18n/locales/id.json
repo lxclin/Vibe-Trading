@@ -649,6 +649,12 @@
   },
   "agent": {
     "reasoningStrength": "Tingkat Reasoning",
+    "modelSwitchLabel": "Ganti model chat",
+    "modelSwitchTo": "Ganti ke {{provider}} (berlaku mulai pesan berikutnya)",
+    "modelSwitchBusyHint": "Tunggu respons saat ini selesai sebelum mengganti model",
+    "modelSwitched": "Model diganti ke {{provider}}; pesan berikutnya akan menggunakannya",
+    "modelSwitchFailed": "Gagal mengganti model: {{message}}",
+    "modelSwitchUnavailable": "Model ini tidak tersedia dalam konfigurasi saat ini",
     "unknownProvider": "Provider tidak diketahui",
     "unknownModel": "Model tidak diketahui",
     "connectionLostReconnect": "Koneksi terputus, menghubungkan kembali…",

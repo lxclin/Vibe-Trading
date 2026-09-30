@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-import pytest
 
 from src.config.limits import TOOL_RESULT_LIMIT, truncate_tool_result
 from src.tools._result_paging import fit_records

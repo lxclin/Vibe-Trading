@@ -12,7 +12,6 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 
 from backtest.loaders import eastmoney_client, yahoo_client
 from src.tools.stock_news_tool import (

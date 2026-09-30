@@ -367,6 +367,7 @@ class _PolicyMixin:
             self._identity_required
             and self._identities
             and status in {"unresolved", "conflicting", "invalidated"}
+            and not self._is_safe_identity_abstention(content)
         ):
             issues.append(
                 {
@@ -467,6 +468,20 @@ class _PolicyMixin:
             if figure.shape not in ("measured", "bare"):
                 continue
             declaration = block.match(figure.value, figure.percent, figure.digits)
+            if declaration is None:
+                line, line_offset = positions[figure.line]
+                local_start = max(0, figure.start - line_offset)
+                prefix = line[:local_start]
+                # A total position cost is money, but it is not the quoted
+                # unit price. A rejected aggregate quote is likewise a caveat,
+                # provided the same sentence explicitly disclaims it.
+                if figure.currency and re.search(r"(?:股成本|总成本|合约价值)\s*$", prefix):
+                    continue
+                if (
+                    re.search(r"聚合报价", prefix)
+                    and re.search(r"(?:冲突|不一致).*(?:不可|不能).*(?:可靠|行情)", line)
+                ):
+                    continue
             symbol = self._figure_symbol(
                 content, figure, declaration, line_symbols, document_symbol, records
             )
@@ -634,9 +649,13 @@ class _PolicyMixin:
         then its line; the whole-answer fallback is left to the caller.
         """
         if figure.symbol:
-            normalized = _normalize_symbol(figure.symbol)
-            if normalized:
-                return normalized
+            symbols = _scan_symbols(figure.symbol)
+            if len(symbols) == 1:
+                return next(iter(symbols))
+            if not symbols:
+                normalized = _normalize_symbol(figure.symbol)
+                if normalized in {record.symbol for record in records}:
+                    return normalized
         left, right = segment_bounds(content, figure.start, figure.end)
         segment_symbol = self._symbol_for_claim(content[left:right], records)
         if segment_symbol:
@@ -684,8 +703,24 @@ class _PolicyMixin:
             if not call_id or not field:
                 return [], []
             records, entries = self._field_sources(field, symbol)
-            records = [record for record in records if record.call_id == call_id]
-            metrics = [float(entry["value"]) for entry in entries if entry.get("call_id") == call_id]
+            # Models often cite a read-only tool and one of its returned fields
+            # as ``tool::field``. Restrict that shorthand to the newest report
+            # period so an older quarter cannot validate a current figure.
+            tool_records = [record for record in records if record.tool == call_id]
+            if tool_records:
+                records = tool_records
+                dated = [record.timestamp for record in records if record.timestamp]
+                if dated:
+                    newest = max(dated)
+                    records = [record for record in records if record.timestamp == newest]
+                metrics = [
+                    float(entry["value"])
+                    for entry in entries
+                    if entry.get("tool") == call_id
+                ]
+            else:
+                records = [record for record in records if record.call_id == call_id]
+                metrics = [float(entry["value"]) for entry in entries if entry.get("call_id") == call_id]
         else:
             records, entries = self._field_sources(key, symbol)
             if records or entries:
@@ -730,7 +765,10 @@ class _PolicyMixin:
                 if not _is_price_kind(record) and not _is_metadata_count_leaf(record.field)
             ]
         elif figure is not None and figure.currency:
-            records = [record for record in records if _is_price_kind(record)]
+            records = [
+                record for record in records
+                if _is_price_kind(record) or record.tool == "get_financial_statements"
+            ]
             metrics = []
         return records, metrics
 

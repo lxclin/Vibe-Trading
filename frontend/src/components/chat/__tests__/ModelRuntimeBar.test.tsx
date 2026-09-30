@@ -91,6 +91,56 @@ describe("ModelRuntimeBar", () => {
     expect(onProviderSwitch).toHaveBeenCalledWith("deepseek");
   });
 
+  it("allows choosing Luna and a non-fixed reasoning effort for ChatGPT", () => {
+    const onChatGptModelChange = vi.fn();
+    const onReasoningEffortChange = vi.fn();
+    render(
+      <ModelRuntimeBar
+        settings={{
+          ...settings,
+          provider: "openai-codex",
+          model_name: "openai-codex/gpt-5.6-sol",
+          reasoning_effort: "medium",
+        }}
+        onProviderSwitch={vi.fn()}
+        onChatGptModelChange={onChatGptModelChange}
+        onReasoningEffortChange={onReasoningEffortChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Model Name ChatGPT" }), {
+      target: { value: "openai-codex/gpt-5.6-luna" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Reasoning Effort" }), {
+      target: { value: "max" },
+    });
+
+    expect(onChatGptModelChange).toHaveBeenCalledWith("openai-codex/gpt-5.6-luna");
+    expect(onReasoningEffortChange).toHaveBeenCalledWith("max");
+  });
+
+  it("shows the configured custom Codex model instead of claiming 5.6 Sol", () => {
+    render(
+      <ModelRuntimeBar
+        settings={{ ...settings, provider: "openai-codex", model_name: "openai-codex/gpt-6-astra" }}
+        onChatGptModelChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Model Name ChatGPT" })).toHaveValue(
+      "openai-codex/gpt-6-astra",
+    );
+  });
+
+  it("keeps the provider-default reasoning setting selectable", () => {
+    render(
+      <ModelRuntimeBar
+        settings={{ ...settings, provider: "openai-codex", reasoning_effort: "" }}
+        onReasoningEffortChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Reasoning Effort" })).toHaveValue("");
+  });
+
   it("disables both model choices while a response is running", () => {
     render(
       <ModelRuntimeBar

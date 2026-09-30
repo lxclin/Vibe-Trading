@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import re
 from datetime import date, timedelta
 from typing import Iterable

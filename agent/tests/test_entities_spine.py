@@ -15,7 +15,7 @@ from src.entities.cashflow import (
 )
 from src.entities.ingest import CashFlowIngestError, load_cashflows
 from src.entities.cashflow import FxRate, FxRateTable, MissingExchangeRateError, translate_cashflows
-from src.entities.ingest import EntityPanel, PanelIngestError, PanelObservation, load_panel
+from src.entities.ingest import PanelIngestError, PanelObservation, load_panel
 from src.entities.models import (
     Bond,
     Entity,

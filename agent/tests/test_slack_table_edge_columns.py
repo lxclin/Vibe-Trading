@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import sys
+import types
 
 from tests.slack_stubs import install_slack_stubs
 

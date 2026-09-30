@@ -649,6 +649,12 @@
   },
   "agent": {
     "reasoningStrength": "Esforço de raciocínio",
+    "modelSwitchLabel": "Trocar modelo de chat",
+    "modelSwitchTo": "Trocar para {{provider}} (vale a partir da próxima mensagem)",
+    "modelSwitchBusyHint": "Aguarde a resposta atual terminar antes de trocar de modelo",
+    "modelSwitched": "Modelo alterado para {{provider}}; a próxima mensagem usará esse modelo",
+    "modelSwitchFailed": "Falha ao trocar de modelo: {{message}}",
+    "modelSwitchUnavailable": "Este modelo não está disponível na configuração atual",
     "unknownProvider": "Provedor desconhecido",
     "unknownModel": "Modelo desconhecido",
     "connectionLostReconnect": "Conexão perdida, reconectando…",

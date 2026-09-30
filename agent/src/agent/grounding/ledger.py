@@ -15,11 +15,19 @@ from src.agent.grounding.identity import (
     IdentityRecord,
     _IdentityMixin,
     _normalize_symbol,
+    _query_key,
     _RESOLVER_TOOL,
     _scan_symbols,
     _utc_now,
 )
+from src.agent.grounding.identity_scope import (
+    IdentityScopeMixin,
+    _BARE_LISTED_CODE_RE,
+    _REFERENTIAL_FOLLOWUP_RE,
+    _TRADE_MANAGEMENT_FOLLOWUP_RE,
+)
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
+from src.agent.grounding.decision import decision_issues, is_single_buy_question
 from src.agent.grounding.figures import parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
 from src.agent.grounding.release import (
@@ -48,6 +56,7 @@ _ACTIONABLE_MARKET_RE = re.compile(
     r"\bvaluation of\b|\bwhat (?:is|are) .{1,80} worth\b|"
     r"\bis .{1,80} (?:listed|publicly traded)\b|"
     r"买入|卖出|入场|目标价|现价|最新价|股价|交易价格|估值|值多少钱|"
+    r"值得买|能买吗|能否买|适合买|是否值得投资|"
     r".{1,40}(?:是否|有没有|已经|已)(?:在.{0,20})?上市)",
     re.IGNORECASE,
 )
@@ -61,15 +70,41 @@ _SCREENING_REQUEST_RE = re.compile(
     r"find\s+(?:stocks?|funds?))",
     re.IGNORECASE,
 )
+_META_DELIVERY_RE = re.compile(
+    r"(?:报告|结果|结论).{0,16}(?:已|已经)(?:交付|完成|给出)|"
+    r"上方(?:完整(?:版|报告)|报告正文)|不再重复(?:内容)?",
+    re.IGNORECASE,
+)
+_IDENTITY_ABSTENTION_RE = re.compile(
+    r"无法(?:安全)?确认|不能确认|无法核验|请(?:提供|确认|告诉)|"
+    r"需要.*(?:平台|交易所|代码|交易对)|存在多个候选|"
+    r"unable to (?:verify|confirm|resolve)|please (?:provide|confirm)|multiple candidates",
+    re.IGNORECASE,
+)
+_UNSAFE_MARKET_CONCLUSION_RE = re.compile(
+    r"(?:建议|应当|应该|可以|适合|值得|推荐).{0,12}(?:买入|卖出|建仓|加仓)|"
+    r"(?:买入价|卖出价|入场价|目标价)\s*[:：]?\s*[-+]?\d|"
+    r"(?:但|仍|依然|预计|预测|判断|认为|结论是).{0,12}(?:看涨|看跌|上涨|下跌)|"
+    r"(?:现价|价格为|报价为|收盘价为)\s*[$¥￥]?\s*\d|"
+    r"(?:recommend|should|worth).{0,20}\b(?:buy|sell|enter)\b",
+    re.IGNORECASE,
+)
 
 
 class GroundingLedger(
+    IdentityScopeMixin,
     _IdentityMixin,
     _EvidenceMixin,
     _PolicyMixin,
     _ReleaseMixin,
 ):
     """Run-scoped identity state machine and evidence ledger."""
+
+    @staticmethod
+    def _is_safe_identity_abstention(content: str) -> bool:
+        return bool(_IDENTITY_ABSTENTION_RE.search(content)) and not bool(
+            _UNSAFE_MARKET_CONCLUSION_RE.search(content)
+        )
 
     def __init__(
         self,
@@ -99,6 +134,14 @@ class GroundingLedger(
             enabled=contextual_identity_constraints,
         )
         self._identities: dict[str, IdentityRecord] = {}
+        self._inherited_symbols: set[str] = set()
+        self._primary_queries: set[str] = set()
+        self._primary_symbols: set[str] = set()
+        self._screening_request = bool(_SCREENING_REQUEST_RE.search(user_message))
+        self._prefer_chinese = bool(re.search(r"[\u3400-\u9fff]", user_message)) or any(
+            bool(re.search(r"[\u3400-\u9fff]", str(item.get("content") or "")))
+            for item in (history or []) if isinstance(item, Mapping)
+        )
         self._evidence: list[EvidenceRecord] = []
         self._tool_failures: list[dict[str, Any]] = []
         self._analysis_completed: list[dict[str, Any]] = []
@@ -112,6 +155,7 @@ class GroundingLedger(
         self._price_evidence_attempts = 0
         self._ingested_csvs: set[str] = set()
         self._identity_required = bool(_ACTIONABLE_MARKET_RE.search(user_message))
+        self._decision_required = is_single_buy_question(user_message)
         self._buffer_output = self._identity_required
         # Every instrument this run is entitled to write about: the ones the
         # user named, plus the ones a succeeding tool call passed in or returned.
@@ -122,6 +166,19 @@ class GroundingLedger(
         self._session_symbol_roots: set[str] = set()
 
         self._seed_symbols(user_message, source="user_message")
+        self._primary_symbols.update(self.authorized_symbols)
+        if self._identity_required and not self._screening_request and not self._primary_symbols:
+            self._primary_queries.update(
+                key for code in _BARE_LISTED_CODE_RE.findall(user_message)
+                if (key := _query_key(code))
+            )
+        if not self._identities and (
+            _REFERENTIAL_FOLLOWUP_RE.fullmatch(user_message or "")
+            or _TRADE_MANAGEMENT_FOLLOWUP_RE.fullmatch(user_message or "")
+        ):
+            self._seed_followup_history(history or [])
+        elif self._identity_required and not self._screening_request and not self._identities:
+            self._seed_named_followup_history(history or [])
         self.persist()
 
     @property
@@ -134,45 +191,11 @@ class GroundingLedger(
         }
 
     @property
-    def identity_status(self) -> str:
-        """Return the aggregate first-class identity state.
+    def inherited_symbols(self) -> set[str]:
+        """Return symbols inherited from prior turns, if any."""
+        return set(self._inherited_symbols)
 
-        ``conflicting`` is the only state that outranks a successful lock: two
-        sources contradicting each other about one query is a fact about the
-        data, not a gap in it. Every other blocking state means "not known
-        yet", and a side query that failed, went unanswered, or returned a
-        shortlist must not retract an identity the run did lock — one flaky
-        resolver call otherwise poisons every remaining answer in the session,
-        with no path back. Per-symbol safety does not depend on this aggregate:
-        a consumer still has to match a locked symbol in
-        :meth:`_match_authorized_symbol` before it may run.
-        """
-        records = list(self._identities.values())
-        if not records:
-            return "unresolved" if self._identity_required else "not_required"
-        statuses = {record.status for record in records}
-        if "conflicting" in statuses:
-            return "conflicting"
-        if "locked" in statuses:
-            return "locked"
-        for blocking in ("ambiguous", "invalidated", "unresolved"):
-            if blocking in statuses:
-                return blocking
-        if "not_found" in statuses:
-            return "not_found"
-        return "unresolved"
 
-    @property
-    def should_request_user_confirmation(self) -> bool:
-        """Stop on a genuine shortlist so the user can choose its instrument."""
-        if not self._identity_required or self.identity_status == "locked":
-            return False
-        if _SCREENING_REQUEST_RE.search(self.user_message):
-            return False
-        return any(
-            record.status in {"ambiguous", "conflicting"}
-            for record in self._identities.values()
-        )
 
     def clarification_prompt(self) -> str:
         """Describe competing instruments and ask for a venue or full symbol."""
@@ -207,6 +230,15 @@ class GroundingLedger(
             details = " / ".join(item for item in (name, venue, kind) if item)
             labels.append(f"{symbol}（{details}）" if details else symbol)
 
+        source_failed = any(
+            record.status == "invalidated"
+            and not record.candidates
+            and (
+                self._is_primary_record(record)
+                or (not self._primary_queries and not self._primary_symbols)
+            )
+            for record in self._identities.values()
+        )
         if is_chinese:
             if labels:
                 return (
@@ -214,11 +246,18 @@ class GroundingLedger(
                     f"{'；'.join(labels)}。\n\n"
                     "请告诉我具体平台、交易所或完整交易对，再继续查询行情。"
                 )
+            if source_failed:
+                return "标的搜索数据源暂时不可用，无法核验证券代码。请稍后重试，或直接提供证券代码。"
             return "我还不能确认唯一的交易标的。请提供具体平台、交易所或完整交易对。"
         if labels:
             return (
                 "I found multiple possible instruments but cannot tell which one you mean: "
                 f"{'; '.join(labels)}. Please provide the venue, exchange, or full trading pair."
+            )
+        if source_failed:
+            return (
+                "The symbol-search data source is unavailable, so I cannot verify "
+                "the ticker. Please retry later or provide the ticker directly."
             )
         return (
             "I cannot confirm one unique instrument yet. Please provide the venue, "
@@ -289,6 +328,8 @@ class GroundingLedger(
         return {
             "status": self.identity_status,
             "authorized_symbols": sorted(self.authorized_symbols),
+            "primary_symbols": sorted(self.primary_symbols),
+            "inherited_symbols": sorted(self.inherited_symbols),
             "records": [asdict(record) for record in self._identities.values()],
             "recovery": self.recovery_summary(),
         }
@@ -388,9 +429,34 @@ class GroundingLedger(
         block = parse_figures_block(content)
         figures = scan_figures(content, block)
         issues: list[dict[str, Any]] = []
+        if (
+            len(content) <= 1_200
+            and _META_DELIVERY_RE.search(content)
+            and not re.search(
+                r"(?:^|\n)\s{0,3}#{1,4}\s+|(?:核心结论|交易对|风险|建议|findings|conclusion)",
+                content,
+                re.IGNORECASE,
+            )
+        ):
+            issues.append({
+                "code": "meta_delivery_without_report",
+                "value": None,
+                "role": None,
+                "span": None,
+                "symbol": None,
+                "message": "A report was claimed but its body is absent from this answer.",
+            })
         issues.extend(self._validate_identity(content))
-        issues.extend(self._validate_unsourced_symbols(content, figures, block))
-        issues.extend(self._validate_figures(content, block, figures))
+        if not (
+            self.identity_status in {"unresolved", "ambiguous", "conflicting", "invalidated"}
+            and self._is_safe_identity_abstention(content)
+        ):
+            issues.extend(self._validate_unsourced_symbols(content, figures, block))
+            issues.extend(self._validate_figures(content, block, figures))
+            if self._decision_required and self.identity_status == "locked":
+                issues.extend(decision_issues(
+                    content, self._evidence, self.primary_symbols, self._tool_failures
+                ))
         issues = self._dedupe_issues(issues)
         result = ValidationResult(
             valid=not issues,

@@ -544,7 +544,7 @@ def test_real_audit_write_on_halt(monkeypatch, tmp_path) -> None:
     # Isolate the runtime root so the real ledger lands under tmp.
     monkeypatch.setattr("src.config.paths.Path.home", lambda: tmp_path)
     from src.live.audit import audit_ledger_path, write_live_action
-    from src.live.halt import halt_flag_set, trip_halt
+    from src.live.halt import trip_halt
 
     tracker = _OrderTracker()
     runner = LiveRunner(

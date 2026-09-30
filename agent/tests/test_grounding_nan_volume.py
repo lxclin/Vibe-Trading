@@ -9,7 +9,6 @@ produced ``nan`` in the formatted output via ``:.2f``.
 
 from __future__ import annotations
 
-import math
 
 import importlib.util
 import sys

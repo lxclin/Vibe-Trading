@@ -61,6 +61,27 @@ class TestEstimateTokens:
 
 
 class TestMicrocompact:
+    def test_preserves_two_complete_parallel_tool_batches(self) -> None:
+        messages = [{"role": "system", "content": "instructions"}]
+        for batch, count in ((0, 3), (1, 4), (2, 4)):
+            calls = [
+                {"id": f"batch-{batch}-{index}", "function": {"name": "read_url", "arguments": "{}"}}
+                for index in range(count)
+            ]
+            messages.append({"role": "assistant", "content": "", "tool_calls": calls})
+            messages.extend(
+                {"role": "tool", "name": "read_url", "tool_call_id": call["id"],
+                 "content": f"evidence {call['id']} " + "x" * 200}
+                for call in calls
+            )
+
+        _microcompact(messages)
+
+        results = {msg["tool_call_id"]: msg["content"] for msg in messages if msg.get("role") == "tool"}
+        assert all(results[f"batch-0-{i}"].startswith("[CLEARED FROM CONTEXT:") for i in range(3))
+        assert all(not results[f"batch-1-{i}"].startswith("[CLEARED FROM CONTEXT:") for i in range(4))
+        assert all(not results[f"batch-2-{i}"].startswith("[CLEARED FROM CONTEXT:") for i in range(4))
+
     def test_clears_old_tool_messages(self) -> None:
         messages = [
             {"role": "system", "content": "system"},

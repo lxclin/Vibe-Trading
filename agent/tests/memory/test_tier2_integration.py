@@ -11,12 +11,11 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 
 from src.config.accessor import reset_env_config
-from src.memory.persistent import PersistentMemory, MemoryEntry
+from src.memory.persistent import PersistentMemory
 from src.memory.lifecycle import MemoryLifecycle
 from src.tools.remember_tool import RememberTool
 

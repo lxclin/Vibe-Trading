@@ -35,7 +35,13 @@
     "default_base_url": "https://chatgpt.com/backend-api/codex/responses",
     "api_key_required": false,
     "auth_type": "oauth",
-    "login_command": "vibe-trading provider login openai-codex"
+    "login_command": "vibe-trading provider login openai-codex",
+    "suggested_models": [
+      "openai-codex/gpt-5.6-sol",
+      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-6-sol",
+      "openai-codex/gpt-6-luna"
+    ]
   },
   {
     "name": "deepseek",

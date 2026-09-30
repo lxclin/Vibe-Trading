@@ -755,6 +755,7 @@ export interface LLMProviderOption {
   default_model: string;
   default_base_url: string;
   base_url_options?: string[];
+  suggested_models?: string[];
   api_key_required: boolean;
   auth_type?: string;
   login_command?: string | null;

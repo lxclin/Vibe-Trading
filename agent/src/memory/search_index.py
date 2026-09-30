@@ -422,7 +422,7 @@ class MemorySearchIndex:
         """
         tokens: list[str] = []
         cjk_buffer: list[str] = []
-    
+
         # Walk through pre-extracted raw tokens
         raw_tokens = re.findall(
             r"[a-zA-Z0-9_]{2,}|[\u4e00-\u9fff\u3400-\u4dbf]", query
@@ -435,10 +435,10 @@ class MemorySearchIndex:
                     tokens.extend(_cjk_query_tokens(cjk_buffer))
                     cjk_buffer = []
                 tokens.append(tok)
-    
+
         if cjk_buffer:
             tokens.extend(_cjk_query_tokens(cjk_buffer))
-    
+
         if not tokens:
             return '""'
         # Quote each token and join with OR for broader matching

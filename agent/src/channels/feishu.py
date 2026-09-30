@@ -677,7 +677,6 @@ class FeishuChannel(BaseChannel):
         self.config.app_id = result["app_id"]
         self.config.app_secret = result["app_secret"]
         self.config.domain = result.get("domain", "feishu")
-
         # Write credentials back to the operator config before claiming login
         # success. The registration endpoint returns the secret only once.
         try:

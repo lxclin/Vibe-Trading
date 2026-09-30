@@ -159,7 +159,7 @@ _METADATA_COUNT_TAILS = frozenset(
 )
 
 # Money-denominated row fields a currency-marked figure may quote besides a price.
-_AMOUNT_FIELDS = frozenset({"amount", "turnover", "成交额"})
+_AMOUNT_FIELDS = frozenset({"amount", "turnover", "成交额", "market_cap_cny"})
 
 
 def _symbol_from_csv_filename(stem: str) -> str | None:
@@ -454,6 +454,7 @@ class EvidenceRecord:
     currency: str | None = None
     venue: str | None = None
     currency_conversion: str | None = None
+    adjustment: str | None = None
 
 
 def _is_price_kind(record: EvidenceRecord) -> bool:
@@ -706,6 +707,12 @@ class _EvidenceMixin:
                 and symbol_provenance.get("currency_conversion")
                 else None
             )
+            adjustment = (
+                str(symbol_provenance.get("adjustment"))
+                if isinstance(symbol_provenance, dict)
+                and symbol_provenance.get("adjustment")
+                else None
+            )
             for row in rows:
                 if not isinstance(row, dict):
                     continue
@@ -730,6 +737,7 @@ class _EvidenceMixin:
                             currency=_infer_currency(symbol),
                             venue=_infer_venue(symbol),
                             currency_conversion=currency_conversion,
+                            adjustment=adjustment,
                         )
                     )
         unresolved = payload.get("_unresolved")
@@ -767,7 +775,7 @@ class _EvidenceMixin:
             )
         source = str(payload.get("source") or tool_name)
         remaining = _MAX_GENERIC_EVIDENCE
-        timestamp_fields = (*_TIMESTAMP_FIELDS, "as_of")
+        timestamp_fields = (*_TIMESTAMP_FIELDS, "as_of", "report_date")
 
         def visit(value: Any, path: str, timestamp: str | None = None) -> None:
             nonlocal remaining

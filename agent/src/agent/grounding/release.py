@@ -310,12 +310,34 @@ class _ReleaseMixin:
     def safe_fallback(self) -> str:
         """Return a deterministic fail-closed answer after repeated rejection."""
         is_zh = self._user_writes_chinese()
+        if self._decision_required and self.identity_status == "locked" and self.primary_symbols:
+            symbols = "、".join(sorted(self.primary_symbols))
+            if is_zh:
+                return (
+                    f"## 研究判断\n\n结论：暂不买入（等待）。标的：{symbols}。\n"
+                    "期限：按提问指定的期限；未指定时按未来六至十二个月评估。\n"
+                    "信心：低。\n\n主要依据：本轮生成的买入分析没有通过数据核验，"
+                    "目前缺少一份可供复核的完整结论；等待不代表判断股价必然下跌。\n\n"
+                    "改变判断的条件：重新取得并核对同期行情、财报和估值依据后再评估。"
+                )
+            return (
+                f"## Research view\n\nVerdict: wait for {symbols}.\n"
+                "Horizon: the requested period, or six to twelve months if unspecified.\n"
+                "Confidence: low.\n\nKey evidence: this run's buy thesis failed data "
+                "verification, so no complete, auditable conclusion is available. "
+                "Waiting does not predict a decline.\n\nWhat changes the view: retrieve "
+                "and reconcile matching price, financial, and valuation evidence."
+            )
         joined = self._observed_range_summary(is_zh)
         if joined is not None:
             if is_zh:
+                if re.search(r"(?:买入|买了|持有|建仓).{0,40}(?:后面|之后|接下来|卖出|退出)", self.user_message):
+                    return (
+                        f"当前已核验到 {joined}。现有证据不足以给出确定的卖出时点；"
+                        "可先设定止损、止盈和分批退出条件，并结合你的风险承受能力调整。"
+                    )
                 return (
-                    "为避免输出与工具证据冲突的价格，我已拒绝上一版答案。"
-                    f"当前可验证的已观测 OHLC 范围是：{joined}。"
+                    f"当前已核验到的 OHLC 范围是：{joined}。"
                     "在重新核对标的或明确展示推导公式前，我不会生成买入价。"
                 )
             return (
@@ -325,6 +347,25 @@ class _ReleaseMixin:
             )
         # No observed price: tell unresolved identity apart from a draft citing
         # prices this session never observed.
+        if self.identity_status in {"ambiguous", "conflicting"}:
+            candidates = sorted({
+                _normalize_symbol(item.get("symbol"))
+                for record in self._identities.values()
+                if record.status in {"ambiguous", "conflicting"}
+                for item in record.candidates
+                if item.get("symbol")
+            })
+            if candidates:
+                names = "、".join(candidates) if is_zh else ", ".join(candidates)
+                if is_zh:
+                    return (
+                        f"找到候选 {names}，但无法确认唯一的交易标的或价格。"
+                        "请提供你看到它的具体平台和交易对。"
+                    )
+                return (
+                    f"Found candidate instruments {names}, but their identity and prices "
+                    "are not confirmed. Please provide the platform and trading pair."
+                )
         issue_codes = {
             code
             for validation in self._validations
@@ -342,6 +383,11 @@ class _ReleaseMixin:
                 "be verified. Re-run the task and let the agent fetch the market data first, "
                 "or ask it to answer without the unverified prices."
             )
+        if self.identity_status == "locked" and self.primary_symbols:
+            symbols = "、".join(sorted(self.primary_symbols))
+            if is_zh:
+                return f"已确认标的 {symbols}，但本轮未取得可核验的价格，因此暂不能给出交易结论。"
+            return f"The instrument {symbols} is confirmed, but this run has no verified price evidence."
         if is_zh:
             return (
                 "当前无法安全确认标的身份或价格证据，因此没有生成交易结论。"
@@ -354,7 +400,7 @@ class _ReleaseMixin:
 
     def _user_writes_chinese(self) -> bool:
         """Return whether user-facing gate text should be Chinese."""
-        return bool(re.search(r"[\u3400-\u9fff]", self.user_message))
+        return self._prefer_chinese
 
     def _observed_range_summary(self, is_zh: bool, content: str | None = None) -> str | None:
         """Summarise the observed OHLC range per symbol, or None without prices.
@@ -368,6 +414,10 @@ class _ReleaseMixin:
             One fact per symbol, or None when the run observed no price.
         """
         price_records = self._price_records()
+        if self.primary_symbols:
+            price_records = [
+                record for record in price_records if record.symbol in self.primary_symbols
+            ]
         if not price_records:
             return None
         by_symbol: dict[str, list[EvidenceRecord]] = {}

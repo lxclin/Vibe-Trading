@@ -118,7 +118,7 @@ def test_market_trigger_rejects_unknown_market() -> None:
 
 
 def test_market_trigger_without_market_raises() -> None:
-    bad = Trigger(kind=TriggerKind.MARKET, market=None)
+    bad = Trigger(kind=TriggerKind.MARKET, market_key=None)
     with pytest.raises(ValueError):
         due_now(bad, 0)
 

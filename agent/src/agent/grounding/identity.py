@@ -339,6 +339,10 @@ def _infer_instrument_type(symbol: str, candidate_type: Any = None) -> str:
     if "index" in raw:
         return "index"
     upper = _normalize_symbol(symbol)
+    # Mainland fund code bands are authoritative when a listing provider
+    # labels an ETF as EQUITY (observed with Shanghai 518850/513330).
+    if re.fullmatch(r"(?:5\d{5})\.SH|(?:1\d{5})\.SZ", upper):
+        return "fund"
     if upper.endswith("=F"):
         return "future"
     if upper.endswith(".FX"):
@@ -454,10 +458,33 @@ class _IdentityMixin:
             cannot affect another call in this same batch.
         """
         if tool_name == _RESOLVER_TOOL:
+            query = str(arguments.get("query") or "")
+            if (
+                self._primary_queries
+                and not self._primary_symbols
+                and not self._query_matches_primary_hint(query)
+            ):
+                return ToolAuthorization(
+                    allowed=False,
+                    error_code="primary_identity_required",
+                    message="Resolve the user's requested instrument before a peer or benchmark.",
+                )
             self._identity_required = True
             self._buffer_output = True
-            self._begin_resolution(str(arguments.get("query") or ""), call_id)
+            self._begin_resolution(query, call_id)
             return ToolAuthorization(allowed=True)
+
+        if (
+            tool_name == "screen_market"
+            and self._identity_required
+            and not self._screening_request
+            and (batch_identity_status or self.identity_status) != "locked"
+        ):
+            return ToolAuthorization(
+                allowed=False,
+                error_code="identity_required",
+                message="Resolve the requested instrument before screening a whole market.",
+            )
 
         if self._is_private_company_skill(tool_name, arguments):
             return self._authorize_private_company_skill()
@@ -608,6 +635,14 @@ class _IdentityMixin:
     def _seed_symbols(self, text: str, *, source: str) -> None:
         """Lock exact symbols explicitly supplied by a user."""
         for match in _CANONICAL_SYMBOL_RE.finditer(text or ""):
+            prefix = (text or "")[max(0, match.start() - 12):match.start()]
+            if re.search(
+                r"(?:例如|比如|譬如|不要使用|不要用|不得使用|切勿使用|"
+                r"e\.g\.?|such\s+as|do\s+not\s+use|don't\s+use)\s*$",
+                prefix,
+                re.IGNORECASE,
+            ):
+                continue
             symbol = _normalize_symbol(match.group(0))
             key = f"explicit:{symbol}"
             existing = self._identities.get(key)
@@ -629,7 +664,12 @@ class _IdentityMixin:
     def _begin_resolution(self, query: str, call_id: str) -> None:
         """Enter unresolved state before the resolver executes."""
         key = _query_key(query) or f"call:{call_id}"
+        if not self._screening_request and not self._primary_queries and not self._primary_symbols:
+            self._primary_queries.add(key)
         existing = self._identities.get(key)
+        if existing and existing.status == "locked":
+            self.persist()
+            return
         self._identities[key] = IdentityRecord(
             query=query,
             status="unresolved",
@@ -647,6 +687,8 @@ class _IdentityMixin:
         query = str(arguments.get("query") or "")
         key = _query_key(query) or f"call:{call_id}"
         existing = self._identities.get(key)
+        if existing and existing.status == "locked":
+            return
         self._identities[key] = IdentityRecord(
             query=query,
             status="invalidated",
@@ -669,6 +711,8 @@ class _IdentityMixin:
         version = (existing.version + 1) if existing else 1
 
         if not isinstance(payload, dict) or payload.get("ok") is False:
+            if existing and existing.status == "locked":
+                return
             self._identities[key] = IdentityRecord(
                 query=query,
                 status="invalidated",
@@ -739,7 +783,9 @@ class _IdentityMixin:
                 )
                 return
 
-        chosen = self._choose_candidate(query, candidates)
+        chosen = self._choose_candidate(
+            query, self._venue_compatible_candidates(query, candidates)
+        )
         if chosen is None:
             self._identities[key] = IdentityRecord(
                 query=query,
@@ -756,6 +802,20 @@ class _IdentityMixin:
             self._identities[key] = IdentityRecord(
                 query=query,
                 status="invalidated",
+                source_tool_call_id=call_id,
+                candidates=resolver_candidates,
+                resolution_constraints=constraint_audit,
+                version=version,
+            )
+            return
+
+        from src.agent.grounding.identity_scope import _CRYPTO_REQUEST_RE
+        if _CRYPTO_REQUEST_RE.search(self.user_message) and _infer_instrument_type(
+            symbol, chosen.get("type")
+        ) != "crypto":
+            self._identities[key] = IdentityRecord(
+                query=query,
+                status="conflicting",
                 source_tool_call_id=call_id,
                 candidates=resolver_candidates,
                 resolution_constraints=constraint_audit,
@@ -815,6 +875,8 @@ class _IdentityMixin:
             resolution_constraints=constraint_audit,
             version=version,
         )
+        if self._query_matches_primary_hint(query):
+            self._primary_symbols.add(symbol)
         self._supersede_shortlists(symbol)
 
     def _supersede_shortlists(self, symbol: str) -> None:

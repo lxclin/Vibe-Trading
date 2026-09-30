@@ -70,9 +70,13 @@ export function Settings() {
         if (llmResult.status === "fulfilled") {
           setSettings(llmResult.value);
           setForm(toForm(llmResult.value));
+          const selectedProvider = llmResult.value.providers.find(
+            (provider) => provider.name === llmResult.value.provider,
+          );
           setModelOptions(Array.from(new Set([
             llmResult.value.model_name,
-            llmResult.value.providers.find((provider) => provider.name === llmResult.value.provider)?.default_model ?? "",
+            selectedProvider?.default_model ?? "",
+            ...(selectedProvider?.suggested_models ?? []),
           ].filter(Boolean))));
         } else {
           const message = llmResult.reason instanceof Error
@@ -122,7 +126,7 @@ export function Settings() {
       model_name: provider.default_model,
       base_url: provider.default_base_url,
     });
-    setModelOptions([provider.default_model]);
+    setModelOptions(Array.from(new Set([provider.default_model, ...(provider.suggested_models ?? [])])));
     setModelListHint(null);
   };
 
@@ -137,7 +141,7 @@ export function Settings() {
     });
     setApiKey("");
     setClearApiKey(false);
-    setModelOptions([provider.default_model]);
+    setModelOptions(Array.from(new Set([provider.default_model, ...(provider.suggested_models ?? [])])));
     setModelListHint(null);
   };
 
@@ -154,6 +158,7 @@ export function Settings() {
       setModelOptions(Array.from(new Set([
         form.model_name,
         selectedProvider.default_model,
+        ...(selectedProvider.suggested_models ?? []),
         ...result.models,
       ].filter(Boolean))));
       const warningMessages = {

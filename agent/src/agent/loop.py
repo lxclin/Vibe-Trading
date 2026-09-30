@@ -30,10 +30,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
+from src.agent.grounding.decision import decision_guidance
 from src.agent.grounding.release import MAX_GROUNDING_REVISIONS
 from src.agent.memory import WorkspaceMemory
 from src.agent.progress import HeartbeatTimer, ProgressEvent, _set_emitter
-from src.agent.tool_progress import RECOVERY_MESSAGE, ToolProgress
+from src.agent.tool_progress import NO_PROGRESS_LIMIT, RECOVERY_MESSAGE, ToolProgress
 from src.agent.tools import ToolRegistry
 from src.agent.trace import TraceWriter
 from src.core.state import RunStateStore
@@ -60,6 +61,7 @@ from src.tools.redaction import redact_payload, redact_tool_result
 RUNS_DIR = get_runs_dir()
 SESSIONS_DIR = get_sessions_dir()
 KEEP_RECENT = 3
+KEEP_RECENT_TOOL_BATCHES = 2
 LLM_USAGE_ARTIFACT = "llm_usage.json"
 
 COLLAPSE_PRESERVE_RECENT = 6
@@ -86,6 +88,14 @@ MAX_CONSECUTIVE_EMPTY_RESPONSE_SKIPS = 1
 # model is never told to use a result it can no longer see, and a loop of
 # identical re-runs still ends at the no-progress limit.
 MAX_READONLY_REPLAY_RECOVERIES = 6
+
+# These reports are snapshots for one analysis run. Reissuing the exact same
+# query after a successful read adds no evidence and can trap the model in a
+# fetch/compact/fetch loop. Different statement, period, offset, or date range
+# still has a different call key and remains available.
+_RUN_STABLE_RESEARCH_TOOLS = frozenset({
+    "get_financial_statements", "get_research_reports",
+})
 
 
 def _override(name: str):
@@ -515,8 +525,72 @@ def _replay_context_result(result: str) -> str:
     return json.dumps(replay_payload, ensure_ascii=False)
 
 
+_FINANCIAL_SUMMARY_FIELDS = (
+    "REPORT_DATE", "REPORT_TYPE", "NOTICE_DATE", "CURRENCY", "EPSJB", "BPS",
+    "TOTALOPERATEREVE", "PARENTNETPROFIT", "KCFJCXSYJLR",
+    "TOTALOPERATEREVETZ", "PARENTNETPROFITTZ", "KCFJCXSYJLRTZ",
+    "ROEJQ", "XSMLL", "XSJLL", "ZCFZL", "NETCASH_OPERATE_PK",
+    "NETCASH_INVEST_PK", "NETCASH_FINANCE_PK", "TOTAL_ASSETS", "TOTAL_LIABILITIES",
+    "TOTAL_OPERATE_INCOME", "TOTAL_OPERATE_INCOME_YOY", "PARENT_NETPROFIT",
+    "PARENT_NETPROFIT_YOY", "DEDUCT_PARENT_NETPROFIT",
+    "DEDUCT_PARENT_NETPROFIT_YOY", "NETCASH_OPERATE", "NETCASH_OPERATE_YOY",
+    "NETCASH_INVEST", "NETCASH_FINANCE",
+)
+
+
+def _compact_research_result(name: str, content: str) -> str | None:
+    """Keep the newest citable financial facts when old tool output is pruned."""
+    if name not in {"get_financial_statements", "get_research_reports"}:
+        return None
+    try:
+        payload = json.loads(content)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return None
+    if payload.get("_compacted"):
+        return content
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    if name == "get_financial_statements":
+        compact_data = {}
+        for symbol, item in data.items():
+            periods = item.get("periods") if isinstance(item, dict) else None
+            if not isinstance(periods, list):
+                continue
+            rows = [
+                {key: row[key] for key in _FINANCIAL_SUMMARY_FIELDS if key in row}
+                for row in periods[:1]
+                if isinstance(row, dict)
+            ]
+            compact_data[symbol] = {"periods": rows}
+        summary = {
+            "ok": True, "source": payload.get("source"),
+            "statement": payload.get("statement"), "data": compact_data,
+            "_compacted": "latest report period and selected fields",
+        }
+    else:
+        reports = data.get("reports")
+        if not isinstance(reports, list):
+            return None
+        summary = {
+            "ok": True, "source": payload.get("source"),
+            "data": {"code": data.get("code"), "reports": [
+                {key: report[key] for key in (
+                    "title", "brokerage", "analyst", "publish_date", "rating",
+                    "eps_forecast", "pe_forecast",
+                ) if key in report}
+                for report in reports[:4] if isinstance(report, dict)
+            ]},
+            "_compacted": "four most recent reports; full result remains in run trace",
+        }
+    rendered = json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+    return rendered if len(rendered) < min(len(content), COLLAPSE_TEXT_MIN) else None
+
+
 def _microcompact(messages: list) -> list:
-    """Layer 1: silently prune old tool results, keeping the most recent N intact.
+    """Layer 1: prune old tool results, preserving recent complete tool batches.
 
     Args:
         messages: Message list (mutated in place).
@@ -529,8 +603,26 @@ def _microcompact(messages: list) -> list:
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
     if len(tool_msgs) <= KEEP_RECENT:
         return []
+    # A single assistant turn can issue more than KEEP_RECENT parallel reads.
+    # Clearing the first results before the model sees the next turn makes it
+    # repeat successful research indefinitely. Keep the latest two complete
+    # batches together; layer 3 can still summarize them if they exceed the
+    # overall context budget.
+    protected_call_ids: set[str] = set()
+    batches = 0
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant" or not msg.get("tool_calls"):
+            continue
+        protected_call_ids.update(
+            call["id"] for call in msg["tool_calls"] if call.get("id")
+        )
+        batches += 1
+        if batches >= KEEP_RECENT_TOOL_BATCHES:
+            break
     newly_cleared = []
     for msg in tool_msgs[:-KEEP_RECENT]:
+        if msg.get("tool_call_id") in protected_call_ids:
+            continue
         content = msg.get("content", "")
         # Skip a result already cleared: the marker is itself >100 chars, so
         # re-clearing it would rewrite the recorded original size with the
@@ -541,8 +633,9 @@ def _microcompact(messages: list) -> list:
             # returned nothing, so the model reports "no data was retrieved"
             # for data it did receive and this layer then deleted. Say which
             # it is, and say the result is recoverable.
-            msg["content"] = _cleared_text(len(content))
-            if msg.get("name"):
+            summary = _compact_research_result(str(msg.get("name") or ""), content)
+            msg["content"] = summary if summary is not None else _cleared_text(len(content))
+            if summary is None and msg.get("name"):
                 newly_cleared.append(msg["name"])
     # Identified by prefix, not equality: the marker carries the original
     # length, so every cleared result is a different string.
@@ -1320,34 +1413,34 @@ class AgentLoop:
                 clean_message.pop("grounding_identity", None)
                 model_history.append(clean_message)
         messages = context.build_messages(llm_user_message, model_history)
-        messages.insert(
-            -1,
-            {
-                "role": "system",
-                "content": (
-                    "[GROUNDING OUTPUT CONTRACT] When the answer states any observed market "
-                    "price, name its exact canonical symbol, quote currency, and the actual "
-                    "tool data source. When it states a derived price or return, label it as "
-                    "derived and show the source inputs and formula. Do not claim that a report "
-                    "was delivered unless the report body is present in the same response."
-                ),
-            },
+        grounding_contract = (
+            "[GROUNDING OUTPUT CONTRACT] When the answer states any observed market "
+            "price, name its exact canonical symbol, quote currency, and the actual "
+            "tool data source. When it states a derived price or return, label it as "
+            "derived and show the source inputs and formula. Do not claim that a report "
+            "was delivered unless the report body is present in the same response. "
+            "For financial statement figures, cite the exact returned field name "
+            "(for example get_financial_statements::EPSJB), never an invented English "
+            "alias. A reported amount in 亿元 is the returned yuan value divided by "
+            "100000000. If research reports include dated broker ratings, summarize "
+            "those observed reports with their dates and broker names rather than "
+            "calling the information unavailable."
         )
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] += "\n\n" + grounding_contract
+        else:
+            messages.insert(0, {"role": "system", "content": grounding_contract})
         if self._grounding.inherited_symbols:
             inherited = ", ".join(sorted(self._grounding.inherited_symbols))
-            messages.insert(
-                -1,
-                {
-                    "role": "system",
-                    "content": (
-                        "[GROUNDING CONTEXT] This is a referential follow-up. "
-                        f"The session's previously verified active instrument(s) are: {inherited}. "
-                        "You may reuse those exact canonical symbols. Resolve every additional "
-                        "peer or comparison instrument with search_symbol in a separate tool-call "
-                        "turn before requesting its market or fundamental data."
-                    ),
-                },
+            messages[0]["content"] += (
+                "\n\n[GROUNDING CONTEXT] This is a referential follow-up. "
+                f"The session's previously verified active instrument(s) are: {inherited}. "
+                "You may reuse those exact canonical symbols. Resolve every additional "
+                "peer or comparison instrument with search_symbol in a separate tool-call "
+                "turn before requesting its market or fundamental data."
             )
+        if self._grounding._decision_required:
+            messages[0]["content"] += "\n\n" + decision_guidance(self._grounding._prefer_chinese)
         react_trace: List[Dict[str, Any]] = []
 
         trace_dir = SESSIONS_DIR / session_id if session_id else run_dir
@@ -1564,11 +1657,58 @@ class AgentLoop:
                         reasoning_event["tail"] = reasoning_tail
                     self._emit("reasoning_delta", reasoning_event)
 
+                # If market evidence is already available but repeated reads
+                # bring nothing new, give the model a final text-only turn
+                # before the no-progress watchdog aborts the run. The answer
+                # still passes through the normal grounding validation below.
+                research_evidence_ready = bool(
+                    self._grounding is not None
+                    and any(
+                        record.tool == "get_financial_statements"
+                        and record.status == "observed"
+                        for record in self._grounding._evidence
+                    )
+                )
+                stall_threshold = 3 if research_evidence_ready else NO_PROGRESS_LIMIT - 2
+                stalled_market_analysis = bool(
+                    self._grounding is not None
+                    and self._grounding.identity_status == "locked"
+                    and any(
+                        record.symbol in self._grounding.primary_symbols
+                        for record in self._grounding._price_records()
+                    )
+                    and self._tool_progress.stalled_iterations >= stall_threshold
+                )
+                if stalled_market_analysis:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "<system>Verified evidence for the requested instrument is available. "
+                            "Give a bounded answer now using the market, financial, and research "
+                            "results already visible in this run. Stop repeating tool reads. "
+                            "Quote exact report dates and field names for financial figures. State any "
+                            "missing macro data or uncertainty explicitly; do not invent "
+                            "figures. Do not request an artifact path or another retry.</system>"
+                        ),
+                    })
+
                 # On last iteration, drop tool definitions to force text output
                 is_last_iteration = (iteration == self.max_iterations)
-                tool_defs = None if is_last_iteration else self.registry.get_definitions()
-                if is_last_iteration:
-                    trace.write({"type": "forced_text_only", "iter": current_iter})
+                tool_defs = (
+                    None
+                    if is_last_iteration or stalled_market_analysis
+                    else self.registry.get_definitions()
+                )
+                if is_last_iteration or stalled_market_analysis:
+                    trace.write({
+                        "type": "forced_text_only",
+                        "iter": current_iter,
+                        "reason": (
+                            "no_progress_recovery"
+                            if stalled_market_analysis and not is_last_iteration
+                            else "iteration_limit"
+                        ),
+                    })
 
                 _llm_timeout_s = _llm_timeout_seconds()
                 llm_timeout = _llm_timeout_s if _llm_timeout_s > 0 else None
@@ -2541,6 +2681,7 @@ class AgentLoop:
                 and dedup_key in self._called_ok
                 and (
                     not is_repeatable
+                    or tc.name in _RUN_STABLE_RESEARCH_TOOLS
                     or dedup_key in self._readonly_replay_protected
                 )
             ):

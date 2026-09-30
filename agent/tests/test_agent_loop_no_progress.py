@@ -239,3 +239,60 @@ def test_failure_block_threshold_is_two_sided():
         success=True, is_readonly=False,
     )
     assert not progress.is_blocked(key), "a successful mutation clears the ledger"
+
+
+def test_market_research_finishes_from_existing_evidence_before_no_progress(tmp_path):
+    class RepeatedMarketData(DiscoveryTool):
+        name = "get_market_data"
+        parameters = {
+            "type": "object",
+            "properties": {"codes": {"type": "array", "items": {"type": "string"}}},
+        }
+
+    class MarketLLM:
+        model_name = "offline"
+
+        def __init__(self) -> None:
+            self.text_only_calls = 0
+            self.calls = 0
+
+        def stream_chat(self, messages: list[dict], *, tools=None, **kwargs: object) -> SimpleNamespace:
+            self.calls += 1
+            if tools is None:
+                self.text_only_calls += 1
+                return SimpleNamespace(
+                    content="518850.SH 已取得行情证据；后市仍有不确定性。",
+                    reasoning_content=None,
+                    has_tool_calls=False,
+                    tool_calls=[],
+                )
+            return SimpleNamespace(
+                content="",
+                reasoning_content=None,
+                has_tool_calls=True,
+                tool_calls=[SimpleNamespace(
+                    id=f"market-{self.calls}",
+                    name="get_market_data",
+                    arguments={"codes": ["518850.SH"]},
+                )],
+            )
+
+    market = RepeatedMarketData([
+        json.dumps({
+            "518850.SH": [{"date": "2026-09-23", "close": 8.99}],
+            "_provenance": {"518850.SH": {"source": "offline"}},
+        })
+    ])
+    llm = MarketLLM()
+    loop, _, run_dir = build_loop(tmp_path, market, llm)
+
+    result = loop.run("518850.SH 是否值得买入")
+
+    assert result["status"] == "success"
+    assert llm.text_only_calls == 1
+    assert market.calls < 8
+    assert any(
+        record["type"] == "forced_text_only"
+        and record.get("reason") == "no_progress_recovery"
+        for record in TraceWriter.read(run_dir)
+    )

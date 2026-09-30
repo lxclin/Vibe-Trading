@@ -27,7 +27,7 @@ from .runner import (
     run_ab_comparison,
     tokenize,
 )
-from .metrics import mean_reciprocal_rank, ndcg_at_k, precision_at_k
+from .metrics import precision_at_k
 
 # Project root for report output
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
