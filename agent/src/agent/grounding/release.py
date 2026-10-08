@@ -462,6 +462,17 @@ class _ReleaseMixin:
                 "Data was retrieved, but the report's references could not be uniquely "
                 "matched to the tool records, so the complete conclusion was not released."
             )
+        if any(record.symbol for record in self._comparable_price_records()):
+            if is_zh:
+                return (
+                    "本轮已取得行情，但报告中的数据引用、标的归属或数值未通过核验，"
+                    "因此未发布完整结论。请重试本次分析。"
+                )
+            return (
+                "Market data was retrieved, but the report's references, instrument "
+                "attribution or figures failed verification, so the complete conclusion "
+                "was not released. Please retry the analysis."
+            )
         if issue_codes & _REDACTABLE_CODES and not self._analysis_completed:
             if is_zh:
                 return (

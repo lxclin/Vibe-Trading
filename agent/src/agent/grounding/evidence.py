@@ -1270,6 +1270,8 @@ class _EvidenceMixin:
             for record in self._evidence
             if record.status == "observed"
             and record.field in _PRICE_FIELDS
+            # verify_valuation echoes a model-supplied price; it is not a quote.
+            and record.tool != "financial_rigor"
             and record.value is not None
         ]
 
@@ -1288,6 +1290,8 @@ class _EvidenceMixin:
             if id(record) in already_counted:
                 continue
             if record.status != "observed" or record.value is None:
+                continue
+            if record.tool == "financial_rigor":
                 continue
             field_name = _price_field_for_path(record.field)
             if field_name is None:

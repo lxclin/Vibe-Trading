@@ -552,6 +552,14 @@ class _PolicyMixin:
             symbol = next(iter(symbols))
             scope, separator, field_ref = ref.partition("::")
             field_ref = field_ref if separator else scope
+            # A report-period annotation is metadata, not part of the field.
+            # Keep it as a constraint so an annual ref cannot bind a quarter.
+            report_period = None
+            if scope == "get_financial_statements" and separator:
+                annotated = re.fullmatch(r"(.+?)(?:（(annual|quarter)）|\((annual|quarter)\))", field_ref)
+                if annotated:
+                    field_ref = annotated.group(1)
+                    report_period = annotated.group(2) or annotated.group(3)
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.\[\]]*", field_ref):
                 return replace(declaration, ref=ref)
             allowed_tools = {"get_financial_statements", "get_a_share_valuation", "get_research_reports"}
@@ -564,6 +572,7 @@ class _PolicyMixin:
                      and record.field.rsplit(".", 1)[-1] == field_ref))
                 and record.tool in allowed_tools
                 and (not separator or record.tool == scope)
+                and (not report_period or record.report_period == report_period)
             ]
             # Financial bare fields can span multiple report periods. Require
             # an explicit ISO date in the declaration and one exact match;
@@ -801,7 +810,9 @@ class _PolicyMixin:
                 )
                 continue
             issues.extend(self._check_observed(figure, declaration, symbol, records))
-        market_records = self._price_records()
+        # Raw quote tools use nested fields such as data.last_price. Include
+        # those quotes, while excluding calculator inputs from provenance.
+        market_records = self._comparable_price_records()
         if checked_price and market_records:
             issues.extend(self._validate_price_provenance(content, market_records))
         return issues
