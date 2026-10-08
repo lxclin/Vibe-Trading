@@ -50,6 +50,19 @@ logger = logging.getLogger(__name__)
 _EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
 _SSE_STOCK_LIST_URL = "https://query.sse.com.cn/sseQuery/commonQuery.do"
 
+# Brand names need not equal the current exchange security name. These are
+# reviewed lookup hints, never ticker assertions: the live official catalog
+# must still confirm a listing before it can enter the identity ledger.
+_COMPANY_NAME_HINTS = {
+    "长鑫存储": {
+        "listing_name": "长鑫科技",
+        "references": [
+            "https://www.cxmt.com/",
+            "https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20260724_10826610.shtml",
+        ],
+    },
+}
+
 # Canadian equity suffixes (TSX ``.TO`` / TSX Venture ``.V``). Eastmoney has NO
 # Canada coverage: querying it with a Canadian ticker returns a non-JSON body
 # (``Expecting value: line 1 column 1 (char 0)``) instead of a clean empty
@@ -300,6 +313,22 @@ class SymbolSearchTool(BaseTool):
             official_hits, official_sources = _search_official_a_shares(search_query)
             candidates.extend(official_hits)
             sources.update(official_sources)
+            # A brand alias is only a search hint. Require an exact official
+            # listing-name match and preserve the original resolver subject.
+            name_hint = _COMPANY_NAME_HINTS.get(query)
+            if not candidates and name_hint:
+                official_hits, hint_sources = _search_official_a_shares(name_hint["listing_name"])
+                sources.update({f"{name}_name_hint": status for name, status in hint_sources.items()})
+                for candidate in official_hits:
+                    if candidate.get("name") != name_hint["listing_name"]:
+                        continue
+                    candidates.append({
+                        **candidate,
+                        "matched_alias": query,
+                        "alias_references": list(name_hint["references"]),
+                    })
+                if candidates:
+                    search_query = name_hint["listing_name"]
         if fx_pair is not None:
             pair_no_x = fx_pair[:-2]
             candidates.append(
