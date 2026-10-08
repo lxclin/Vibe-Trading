@@ -59,6 +59,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Missing chat completion events recover from saved history.** Active and
+  timed-out attempts check for their committed reply every ten seconds and
+  when the page regains focus, without resubmitting the prompt. A delayed
+  completion check cannot clear a newer turn in the same conversation.
+
 - **Busy chat recovery after a waiting timeout.** A second send now restores
   the original attempt's progress or completed reply, retains the unsent draft,
   and explains that the backend is still running instead of reporting a generic

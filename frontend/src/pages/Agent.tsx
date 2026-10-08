@@ -698,6 +698,9 @@ export function Agent() {
           act().clearStreamingSession(sid);
           markBackgroundCompletion(sid, attemptId);
           if (act().sessionId !== sid) return true;
+          // A delayed history response for the previous turn must not clear a
+          // newer turn that has already started in the same session.
+          if (act().activity && act().activity?.attemptId !== attemptId) return true;
           clearStreamingView();
           act().setStatus("idle");
           useAgentStore.setState({ toolCalls: [], activity: null });
@@ -1463,7 +1466,44 @@ export function Agent() {
     }
   }, [llmSettings, modelSwitching, status, t]);
 
-  /* Safety timeout: if streaming but no SSE event for sseTimeoutMsRef.current ms, reset to idle */
+  const watchedAttempt = activity ?? [...messages].reverse().find(
+    (message) => message.meta?.activity,
+  )?.meta?.activity;
+  const watchedAttemptId = watchedAttempt?.attemptId;
+  const shouldWatchCompletion = Boolean(watchedAttempt && (
+    ["thinking", "working", "responding", "timeout"].includes(watchedAttempt.state)
+  ));
+
+  // SSE can lose a terminal event across a backend restart or proxy failure.
+  // Durable history is authoritative; keep checking even after the UI stops
+  // waiting, without starting another model request or discarding live text.
+  useEffect(() => {
+    if (!sessionId || !watchedAttemptId || watchedAttemptId.startsWith("pending-") || !shouldWatchCompletion) return;
+    let disposed = false;
+    let checking = false;
+    const checkCompletion = async () => {
+      if (disposed || checking || act().sessionId !== sessionId) return;
+      checking = true;
+      try {
+        await syncCompletedAttempt(sessionId, watchedAttemptId, 1);
+      } finally {
+        checking = false;
+      }
+    };
+    const onVisible = () => { if (!document.hidden) void checkCompletion(); };
+    void checkCompletion();
+    const timer = window.setInterval(() => { void checkCompletion(); }, 10_000);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [sessionId, watchedAttemptId, shouldWatchCompletion, syncCompletedAttempt]);
+
+  /* Safety timeout: no progress events; history reconciliation continues above. */
   useEffect(() => {
     if (status !== "streaming") return;
     // Arm the clock at the start of every streaming turn. Without this, a turn
