@@ -31,7 +31,7 @@ from src.agent.grounding.identity_scope import (
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
 from src.agent.grounding.decision import decision_coverage, decision_issues, is_single_buy_question
 from src.agent.grounding.equity_research import (
-    equity_research_input_issues, equity_worksheet, is_equity_entry_research, needs_entry_inputs,
+    equity_entry_answer_issues, equity_research_input_issues, equity_worksheet, is_equity_entry_research, needs_entry_inputs,
 )
 from src.agent.grounding.figures import Figure, parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
@@ -543,9 +543,12 @@ class GroundingLedger(
                     content, self._evidence, self.primary_symbols, self._tool_failures,
                     self._decision_tool_attempts,
                 ))
-            elif self._equity_entry_inputs_required and self.identity_status == "locked":
+            if self._equity_entry_inputs_required and self.identity_status == "locked":
                 issues.extend(equity_research_input_issues(
                     self._evidence, self.authorized_symbols, self._decision_tool_attempts,
+                ))
+                issues.extend(equity_entry_answer_issues(
+                    content, self._evidence, self.authorized_symbols, self._decision_tool_attempts,
                 ))
         issues = self._dedupe_issues(issues)
         result = ValidationResult(

@@ -328,6 +328,7 @@ class _ReleaseMixin:
             if codes & {
                 "decision_profitability_not_checked", "decision_cash_flow_not_checked",
                 "decision_quarterly_financials_not_checked",
+                "decision_income_not_checked",
             }:
                 return "get_financial_statements"
         if self.identity_status == "locked" and any(
@@ -354,6 +355,7 @@ class _ReleaseMixin:
                 if issue.get("code") in {
                     "decision_raw_valuation_not_checked", "decision_profitability_not_checked",
                     "decision_cash_flow_not_checked", "decision_quarterly_financials_not_checked",
+                    "decision_income_not_checked",
                 }
             ]
             return (
@@ -390,18 +392,18 @@ class _ReleaseMixin:
             symbols = "、".join(sorted(self.primary_symbols))
             if is_zh:
                 return (
-                    f"## 研究判断\n\n结论：暂不买入（等待）。标的：{symbols}。\n"
+                    f"## 研究判断\n\n结论：研究未完成。标的：{symbols}。\n"
                     "期限：按提问指定的期限；未指定时按未来六至十二个月评估。\n"
                     "信心：低。\n\n主要依据：本轮生成的买入分析没有通过数据核验，"
-                    "目前缺少一份可供复核的完整结论；等待不代表判断股价必然下跌。\n\n"
+                    "目前缺少一份可供复核的完整结论，不能据此评价当前价格值得买入或应当等待。\n\n"
                     "改变判断的条件：重新取得并核对同期行情、财报和估值依据后再评估。"
                 )
             return (
-                f"## Research view\n\nVerdict: wait for {symbols}.\n"
+                f"## Research view\n\nVerdict: research incomplete for {symbols}.\n"
                 "Horizon: the requested period, or six to twelve months if unspecified.\n"
                 "Confidence: low.\n\nKey evidence: this run's buy thesis failed data "
                 "verification, so no complete, auditable conclusion is available. "
-                "Waiting does not predict a decline.\n\nWhat changes the view: retrieve "
+                "This failure is not a market verdict.\n\nWhat changes the view: retrieve "
                 "and reconcile matching price, financial, and valuation evidence."
             )
         joined = self._observed_range_summary(is_zh)

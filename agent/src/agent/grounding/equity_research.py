@@ -15,14 +15,14 @@ from zoneinfo import ZoneInfo
 from src.agent.grounding.decision import decision_coverage
 
 _RESEARCH_RE = re.compile(
-    r"买入|值得买|能买吗|投资价值|估值|市盈率|市净率|盈利质量|正常化盈利|"
+    r"买入|值得买|能买吗|买什么|推荐.{0,6}买|投资价值|估值|市盈率|市净率|盈利质量|正常化盈利|"
     r"胜率|更好.{0,8}标的|别的.{0,8}标的|"
     r"\b(?:buy|valuation|undervalued|overvalued|earnings quality|better investment)\b",
     re.IGNORECASE,
 )
 _META_RE = re.compile(r"提示词|怎么问|如何提问|代码|程序|项目|prompt|bug", re.IGNORECASE)
 _ENTRY_RE = re.compile(
-    r"买入|值得买|能买吗|胜率|(?:更好|别的)[^。！？\n]{0,8}标的|"
+    r"买入|值得买|能买吗|买什么|推荐.{0,6}买|胜率|(?:更好|别的)[^。！？\n]{0,8}标的|"
     r"\b(?:buy|worth buying|better investment)\b",
     re.IGNORECASE,
 )
@@ -114,6 +114,12 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
                     ][:4]}
 
         coverage = decision_coverage(records, symbol, attempts)
+        income_attempted = any(
+            isinstance(attempt, dict) and attempt.get("symbol") == symbol
+            and attempt.get("tool") == "get_financial_statements"
+            and attempt.get("statement") == "income" for attempt in attempts
+        )
+        income_observed = any(record.statement == "income" for record in financials)
         missing = [key for key in ("parent_profit", "core_parent_profit", "operating_cash_flow")
                    if key not in facts or "value" not in facts[key]]
         warnings = [
@@ -131,6 +137,18 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
         sheets.append({
             "symbol": symbol, "report_date": period, "facts": facts,
             "coverage": coverage, "missing_same_period_inputs": missing,
+            "research_progress": {
+                "quote": coverage["raw_quote"]["status"],
+                "provider_multiples": coverage["valuation_multiple"]["status"],
+                "financial_inputs": "incomplete" if missing else "observed_analysis_pending",
+                "income_statement": "observed_analysis_pending" if income_observed else (
+                    "unavailable" if income_attempted else "unchecked"
+                ),
+                "original_filing_notes": "not_verified_by_worksheet",
+                "industry_drivers": "not_verified_by_worksheet",
+                "normalized_earnings_and_valuation": "not_verified_by_worksheet",
+                "entry_conditions": "not_verified_by_worksheet",
+            },
             "earnings_normalization": "not_assessed_by_worksheet",
             "fair_value_and_margin_of_safety": "not_assessed_by_worksheet",
             "warnings": warnings,
@@ -149,7 +167,8 @@ def equity_research_guidance(chinese: bool) -> str:
             "[企业买入与比较研究流程] 先区分公司质量、相对排序和当前价格是否值得买；"
             "用户未给期限时说明采用未来6—12个月。比较问题逐个确认标的；基金只检查指数、净值、费用、折溢价和风险，不能索取基金公司的经营财报。"
             "对公司复用已取报价和最新财报，缺字段时分别调用get_financial_statements的quarter/indicators、income、cashflow；"
-            "只补需要的报表，同一失败请求不重复。工作表中的unchecked是不曾查询，unavailable是查询未得到，不能混淆。"
+            "只补需要的报表，同一失败请求不重复；报价工具已内置腾讯备用来源，仍失败时披露缺口，不把失败当看空。"
+            "工作表中的unchecked是不曾查询，unavailable是查询未得到，observed_analysis_pending仅代表数据已取得，不能冒充分析完成。"
             "一、盈利质量：在同一报告期比较归母利润、扣非利润、经营现金流及资本开支；区分合并与归母口径。"
             "从公司/交易所原始报告和附注核对投资收益、公允价值损益、减值、处置、税率、少数股东及股本变动。"
             "不要只读摘要指标；扣非利润不等于正常化盈利，投资损益即使被公司列为经常性，也要单独分析。"
@@ -163,12 +182,20 @@ def equity_research_guidance(chinese: bool) -> str:
             "三、回答：保留‘盈利质量’和‘估值与价格’两节，可简短。第一段说明是初筛排序、条件性偏好，还是已论证当前买入；"
             "比较时对每个候选写当前判断、关键依据与改变条件；仅有低PE/高增长只能支持初筛，不能升级成当前买入建议。"
             "证据不足时说明具体缺口和结论边界，不能把未查询变成看空；有证据时明确作出判断，不用平衡措辞代替回答。"
+            "当前入场结论采用：可考虑买入、公司值得关注但价格偏贵、暂不买入（等待）、回避、研究未完成。"
+            "缺报价、盈利或估值依据时必须区分‘研究未完成’和市场上的等待；初筛偏好可以单独保留。"
+            "回答‘什么时候/什么指标可以买’时列简短状态表：指标、已有读数/日期、判断基准、当前是否满足、缺口或下一步。"
+            "已有同比、利润或现金流数值应保留并声明observed，不要以‘同比增长’替代可核对数字来绕过校验。"
+            "入场条件要说明什么数据与什么基准比较、为什么选择基准；有充分依据才给价格区间及计算。"
+            "未取得指标就写未核实，不能给虚构阈值，也不能把通用清单当作已完成的判断。"
+            "技术走势只作辅助，不能机械要求所有投资都先反弹确认；不承诺更高胜率。"
         )
     return (
         "[Equity entry/comparison research] Separate business quality, relative ranking and value at today's price. "
         "Use one stated horizon (default 6-12 months). Treat funds by NAV, fees, tracking and premium, not issuer accounts. "
         "Reuse quotes and financials; retrieve missing quarterly indicators/income/cashflow only as needed. "
-        "Unchecked means not queried; unavailable means attempted without usable evidence. Do not repeat failed reads. "
+        "Unchecked means not queried; unavailable means attempted without usable evidence. Observed inputs still require analysis. "
+        "The quote tool has a Tencent fallback. Do not repeat failed reads or turn an outage into a bearish verdict. "
         "Include Earnings quality and Valuation and price sections, however brief. Reconcile same-period parent/core profit, "
         "operating cash flow and capex. Check original filing notes for investments, fair-value changes, impairments, "
         "disposals, tax, minority interests and share changes. Core profit is not normalized earnings. Adjust peers "
@@ -181,7 +208,12 @@ def equity_research_guidance(chinese: bool) -> str:
         "Do not use PE for loss-makers, skill examples as data, or calculator output as evidence assumptions are true. "
         "If inputs are unavailable, give a bounded relative ranking without invented targets or win rates. "
         "Identify whether the answer is screening, a conditional preference, or a supported current-entry view. "
-        "Missing research is not bearish evidence; low PE and high past growth alone support screening, not a buy verdict."
+        "Missing research is not bearish evidence; low PE and high past growth alone support screening, not a buy verdict. "
+        "Use favorable / expensive / wait / avoid / research incomplete for current entry. Missing essential price, earnings "
+        "or valuation basis means research incomplete; preserve any bounded screening preference separately. "
+        "For entry-timing questions show metric, observed reading/date, justified benchmark, current satisfaction and next step. "
+        "Retain observed financial figures rather than deleting numbers to bypass validation. Do not invent thresholds. "
+        "Price trends are optional supporting evidence, not a mandatory rebound rule for every investment."
     )
 
 
@@ -217,4 +249,33 @@ def equity_research_input_issues(
                     "Reuse an existing result if it covers the field. A failed read is a gap; do not repeat it."
                 ),
             })
+        if (coverage["profitability"]["status"] == "observed"
+                and not any(isinstance(attempt, dict) and attempt.get("symbol") == symbol
+                            and attempt.get("statement") == "income" for attempt in attempts)
+                and not any(record.symbol == symbol and record.tool == "get_financial_statements"
+                            and record.statement == "income" and _observed(record) for record in records)):
+            issues.append({
+                "code": "decision_income_not_checked", "value": None, "role": None,
+                "span": None, "symbol": symbol, "reason": "decision_income_not_checked",
+                "message": f'Check get_financial_statements(code="{symbol}", statement="income", period="quarter") '
+                "for profit composition before an entry verdict; a summary indicator is not earnings-quality analysis. "
+                "Reuse existing observations; do not repeat a failed income query.",
+            })
     return issues
+
+
+def equity_entry_answer_issues(
+    content: str, records: Sequence[Any], symbols: set[str], attempts: Sequence[Any],
+) -> list[dict[str, Any]]:
+    """Do not let missing essential inputs masquerade as a market verdict."""
+    gaps = [symbol for symbol in sorted(symbols) if is_mainland_company(symbol)
+            and decision_coverage(records, symbol, attempts)["entry_evidence"]["status"] == "incomplete"]
+    if not gaps or re.search(r"研究未完成|暂无法评价|research incomplete|cannot yet assess", content, re.IGNORECASE):
+        return []
+    return [{
+        "code": "decision_research_incomplete_unlabelled", "value": None, "role": None,
+        "span": None, "symbol": symbol, "reason": "decision_research_incomplete_unlabelled",
+        "message": f"Essential entry inputs for {symbol} are missing. Label its current-entry assessment "
+        "研究未完成 / research incomplete and name the gaps; preserve screening preferences separately. "
+        "A provider failure is not evidence that the price is expensive or that the stock should be avoided.",
+    } for symbol in gaps]

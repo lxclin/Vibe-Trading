@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 _BUY_QUESTION_RE = re.compile(
     r"值得(?:现在)?买入|值得买吗|能否买入|能买吗|适合买入|是否(?:值得)?买入|"
     r"现在(?:能|该|要不要)买|买入时机|"
+    r"推荐.{0,6}(?:现在)?买|什么时候[^。！？\n]{0,25}买入|什么指标[^。！？\n]{0,25}买入|"
     r"\b(?:should I buy|worth buying|buy now|good time to buy)\b",
     re.IGNORECASE,
 )
@@ -59,6 +60,7 @@ _VALUATION_BENCHMARK_RE = re.compile(
 )
 
 _WAIT = ("暂不买入", "暂缓买入", "等待", "观望", "暂不考虑买入", "wait", "watch")
+_INCOMPLETE = ("研究未完成", "证据不足", "暂无法评价", "research incomplete", "insufficient evidence")
 _AVOID = ("不值得买入", "回避", "避免买入", "avoid", "unfavorable")
 _FAVORABLE = ("可考虑买入", "值得买入", "可以买入", "favorable", "consider buying")
 _PROFIT_FIELDS = frozenset({"PARENTNETPROFIT", "PARENT_NETPROFIT", "NETPROFIT", "EPSJB"})
@@ -92,7 +94,8 @@ def decision_coverage(
     quote = next((record for record in reversed(quotes) if record.field == "data.last_price"
                   and isinstance(record.value, (int, float)) and record.value > 0), None)
     multiple = next((record for record in reversed(quotes) if record.field in {"data.pe_ttm", "data.pb"}
-                     and isinstance(record.value, (int, float)) and record.value > 0), None)
+                     and isinstance(record.value, (int, float)) and record.value > 0
+                     and quote is not None and record.call_id == quote.call_id), None)
     profit = _latest_financial_fact(records, symbol, _PROFIT_FIELDS)
     cash = _latest_financial_fact(records, symbol, _OPERATING_CASH_FIELDS)
     relevant_attempts = [
@@ -122,6 +125,15 @@ def decision_coverage(
             and profit.timestamp[:10] == cash.timestamp[:10]
             if profit is not None and cash is not None else None
         ),
+    }
+    critical = [key for key in ("raw_quote", "valuation_multiple", "profitability", "operating_cash_flow")
+                if coverage[key]["status"] != "observed"]
+    if coverage["financial_periods_match"] is False:
+        critical.append("matching_financial_periods")
+    coverage["entry_evidence"] = {
+        "status": "incomplete" if critical else "minimum_inputs_observed",
+        "gaps": critical,
+        "boundary": "Minimum inputs are not proof of fair value or a buy thesis. Missing data is not bearish evidence.",
     }
     for key in ("profitability", "operating_cash_flow"):
         as_of = coverage[key]["as_of"]
@@ -160,12 +172,13 @@ def decision_guidance(chinese: bool) -> str:
             "评估估值、盈利/现金流与主要风险；算过但不采用的估值要说明口径原因。"
             "周期股不能只凭半年EPS乘二认定便宜；核对商品价格、正常化盈利及可比估值，取不到就列明缺口。"
             "正面买入结论还需说明所用的历史或同业估值基准。"
-            "第一段按固定字段回答：结论：可考虑买入/暂不买入（等待）/回避；期限：…；信心：高/中/低。"
+            "第一段按固定字段回答：结论：可考虑买入/公司值得关注但价格偏贵/暂不买入（等待）/回避/研究未完成；期限：…；信心：高/中/低。"
             "随后写‘主要依据：’和‘改变判断的条件：’，条件写出可核对指标和比较基准。"
-            "关键估值报价取不到时只能暂不买入、信心低，并明确说明数据缺口。"
+            "关键报价或估值依据取不到时写‘研究未完成’，信心低，列出具体缺口；不得把接口失败转换成等待或看空判断。"
             "这是基于现有证据的研究判断，"
             "不是个人化交易指令；不要用三种情景代替当前判断。"
-            "若行情或财报缺失，只能给‘暂不买入（等待）’，明确指出缺少什么数据。"
+            "若行情或财报缺失，结论为‘研究未完成’，区分已知公司质量与尚不能评价的入场价格。"
+            "‘等待’须有市场或估值证据及可检查的触发条件；价格偏贵须展示估值比较依据。"
         )
     return (
         "[Single-instrument entry research] State the instrument and assumed horizon "
@@ -179,12 +192,13 @@ def decision_guidance(chinese: bool) -> str:
         "statements; assess valuation, earnings/cash flow and key risks. "
         "For cyclicals, do not infer cheapness from annualizing a half-year EPS alone. "
         "A favorable verdict also needs a historical or peer valuation benchmark. "
-        "Begin with Verdict: favorable / wait / avoid; Horizon: ...; Confidence: high / "
+        "Begin with Verdict: favorable / expensive / wait / avoid / research incomplete; Horizon: ...; Confidence: high / "
         "medium / low. Add Key evidence: and What changes the view: with an observable "
         "metric and comparison benchmark. If a necessary unadjusted quote is unavailable, "
-        "choose wait with low confidence and name the gap. This is a research "
+        "choose research incomplete with low confidence and name the gap. A failed provider "
+        "is not a bearish signal. Wait requires market evidence; expensive requires a valuation comparison. This is a research "
         "assessment, not a personalized trade order. If price or financial evidence is "
-        "missing, choose wait and identify the missing data."
+        "missing, choose research incomplete and identify the missing data."
     )
 
 
@@ -198,6 +212,10 @@ def _stance(content: str) -> str | None:
     value = re.sub(r"^(?:(?:当前|目前|现阶段|研究上|at present|currently)\s*)+", "", value)
     if re.search(r"(?:/|／|或|\bor\b).{0,20}(?:买入|等待|观望|回避|wait|avoid|favorable)", value):
         return None
+    if value.startswith(_INCOMPLETE):
+        return "incomplete"
+    if value.startswith(("公司值得关注但价格偏贵", "价格偏贵", "expensive")):
+        return "expensive"
     if value.startswith(_WAIT):
         return "wait"
     if value.startswith(_AVOID):
@@ -228,7 +246,7 @@ def decision_issues(
     if stance is None:
         issue(
             "decision_stance_missing",
-            "Begin with an explicit research verdict: 结论：可考虑买入 / 暂不买入（等待） / 回避. Do not substitute balanced scenarios.",
+            "Begin with an explicit research verdict: 结论：可考虑买入 / 公司值得关注但价格偏贵 / 暂不买入（等待） / 回避 / 研究未完成. Do not substitute balanced scenarios.",
         )
     if not _HORIZON_RE.search(content[:900]):
         issue("decision_horizon_missing", "State the investment horizon explicitly as 期限：… / Horizon: … .")
@@ -300,7 +318,12 @@ def decision_issues(
         if coverage is not None:
             profit = coverage["profitability"]
             cash = coverage["operating_cash_flow"]
+            has_raw_quote = coverage["raw_quote"]["status"] == "observed"
+            has_valuation = coverage["valuation_multiple"]["status"] == "observed"
             has_financials = profit["status"] == "observed"
+            if (profit["status"] != "observed" or cash["status"] != "observed"
+                    or coverage["financial_periods_match"] is False) and stance != "incomplete":
+                issue("decision_evidence_insufficient", "Missing or mismatched profit/cash-flow evidence means 研究未完成 / research incomplete, not a wait/avoid market verdict.")
             quote_attempted = coverage["raw_quote"]["attempted"] or quote_attempted
             if profit["status"] == "unchecked":
                 issue(
@@ -354,10 +377,10 @@ def decision_issues(
                 f"Before answering a buy question for {symbol}, call get_a_share_valuation(code=\"{symbol}\") to obtain an unadjusted quote and valuation basis.",
             )
         if mainland_equity and (not has_raw_quote or not has_valuation):
-            if stance != "wait":
+            if stance != "incomplete":
                 issue(
                     "decision_valuation_basis_missing",
-                    "Without an observed unadjusted quote and valuation basis, choose 暂不买入（等待） / wait.",
+                    "Without an observed unadjusted quote and valuation basis, choose 研究未完成 / research incomplete. Do not turn a data outage into a wait/avoid market verdict.",
                 )
             if confidence not in {"低", "low"}:
                 issue(
@@ -376,10 +399,10 @@ def decision_issues(
                 "decision_valuation_omitted",
                 "The raw quote returned PE/PB. Report at least one observed multiple with its source and as-of time, or explain specifically why the multiple is unusable.",
             )
-        if mainland_equity and stance == "favorable" and not _VALUATION_BENCHMARK_RE.search(content):
+        if mainland_equity and stance in {"favorable", "expensive"} and not _VALUATION_BENCHMARK_RE.search(content):
             issue(
                 "decision_valuation_benchmark_missing",
-                "A favorable A-share entry view needs a named historical or peer valuation benchmark, or a normalized-earnings comparison; an isolated PE/PB is insufficient.",
+                "A favorable or expensive A-share view needs a historical or peer valuation benchmark, or a normalized-earnings comparison; an isolated PE/PB is insufficient.",
             )
         adjusted_prices = any(
             record.tool == "get_market_data"
@@ -403,11 +426,11 @@ def decision_issues(
                 "When multiple key valuation or earnings drivers are explicitly missing, use low confidence or obtain the missing evidence before claiming medium/high confidence.",
             )
         if not (has_price and has_financials):
-            if stance != "wait":
+            if stance != "incomplete":
                 issue(
                     "decision_evidence_insufficient",
-                    "Without both observed price and company financials in this run, choose 暂不买入（等待） / wait rather than a favorable or avoid verdict.",
+                    "Without both observed price and company financials in this run, choose 研究未完成 / research incomplete; incomplete research is not a market verdict.",
                 )
             elif not _MISSING_RE.search(content):
-                issue("decision_missing_data_unspecified", "Name the missing price or financial data behind the wait verdict.")
+                issue("decision_missing_data_unspecified", "Name the missing price or financial data behind the incomplete research assessment.")
     return issues

@@ -466,8 +466,10 @@ class _PolicyMixin:
 
         Codex stores ``call_x|fc_y`` for transport replay, while the model sees
         ``call_x``. Only this exact provider format is recognized. Arbitrary
-        aliases, duplicate call IDs, field paths and values remain unchecked
-        here and must pass the usual validation below.
+        aliases and duplicate call IDs remain invalid. Observed field shorthand
+        can be expanded only by unique identity/date metadata. A narrowly
+        mislabelled rounded observation can be repaired; all numeric, currency
+        and claim checks still run below.
         """
         call_ids = {record.call_id for record in self._evidence}
         call_ids.update(entry.get("call_id") for entry in self._analysis_metrics)
@@ -486,9 +488,82 @@ class _PolicyMixin:
                     parts[index] = next(iter(matches)) + separator + path
             return "".join(parts)
 
+        def normalize_declaration(declaration: Declaration) -> Declaration:
+            ref = normalize(declaration.ref)
+            # Rounding a returned observation is presentation, not a forecast
+            # or arithmetic derivation. Repair this narrow role error only for
+            # one explicitly referenced observation at the written precision.
+            if (declaration.role == "derived"
+                    and re.search(r"四舍五入|\bround(?:ed|ing)\b", declaration.note, re.IGNORECASE)
+                    and _formula_in_note(re.sub(
+                        r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", "", declaration.note,
+                    )) is None):
+                subjects = _scan_symbols(declaration.note)
+                if not subjects and len(self.authorized_symbols) == 1:
+                    subjects = self.authorized_symbols
+                if len(subjects) == 1:
+                    subject = next(iter(subjects))
+                    candidate = normalize_declaration(replace(declaration, role="observed", ref=ref))
+                    scoped = self._referenced(candidate.ref, subject, None)
+                    if scoped is not None:
+                        records, metrics = scoped
+                        dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
+                        if dates:
+                            records = [record for record in records if record.timestamp
+                                       and record.timestamp[:10] in dates]
+                        unique = {(record.call_id, record.field) for record in records}
+                        if len(unique) == 1 and not metrics:
+                            record = records[0]
+                            value = record.value
+                            written = declaration.value_text.rstrip("%")
+                            if _is_number(value) and "." in written:
+                                band = min(abs(value) * ROUNDED_BAND, _written_half_unit(written))
+                                if abs(declaration.value - value) <= max(band * (1 + 1e-9), 1e-9):
+                                    declaration = replace(declaration, role="observed")
+                                    ref = f"{record.call_id}::{record.field}"
+            # Resolve shorthand by identity and date, never by hunting for a
+            # matching number. Value/currency/claim checks still run below.
+            if declaration.role != "observed" or re.search(r"[;,]", ref):
+                return replace(declaration, ref=ref)
+            symbols = {_normalize_symbol(item) for item in _scan_symbols(declaration.note)}
+            if len(symbols) != 1:
+                return replace(declaration, ref=ref)
+            symbol = next(iter(symbols))
+            scope, separator, field_ref = ref.partition("::")
+            field_ref = field_ref if separator else scope
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field_ref):
+                return replace(declaration, ref=ref)
+            if separator and scope not in {"get_financial_statements", "get_a_share_valuation"}:
+                return replace(declaration, ref=ref)
+            records = [
+                record for record in self._evidence
+                if record.status == "observed" and record.symbol == symbol
+                and record.field.rsplit(".", 1)[-1] == field_ref
+                and record.tool in {"get_financial_statements", "get_a_share_valuation"}
+                and (not separator or record.tool == scope)
+            ]
+            # Financial bare fields can span multiple report periods. Require
+            # an explicit ISO date in the declaration and one exact match;
+            # announcement dates can coexist with the reporting date.
+            dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
+            if not separator or scope == "get_financial_statements":
+                records = [
+                    record for record in records
+                    if record.tool == "get_financial_statements"
+                    and record.timestamp and record.timestamp[:10] in dates
+                ]
+            elif dates:
+                records = [
+                    record for record in records
+                    if record.timestamp and record.timestamp[:10] in dates
+                ]
+            if len(records) == 1:
+                record = records[0]
+                ref = f"{record.call_id}::{record.field}"
+            return replace(declaration, ref=ref)
+
         return replace(block, declarations=tuple(
-            replace(declaration, ref=normalize(declaration.ref))
-            for declaration in block.declarations
+            normalize_declaration(declaration) for declaration in block.declarations
         ))
 
     def _validate_figures(
