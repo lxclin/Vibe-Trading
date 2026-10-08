@@ -321,7 +321,7 @@ class _ReleaseMixin:
             if self._symbol_resolution_attempts < MAX_SYMBOL_RESOLUTION_ATTEMPTS:
                 return _RESOLVER_TOOL
             return None
-        if self._decision_required and self.identity_status == "locked":
+        if (self._decision_required or self._equity_research_required) and self.identity_status == "locked":
             codes = {issue.get("code") for issue in validation.issues}
             if "decision_raw_valuation_not_checked" in codes:
                 return "get_a_share_valuation"

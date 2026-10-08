@@ -74,7 +74,7 @@ def _latest_financial_fact(records: Sequence[Any], symbol: str, fields: frozense
         and record.symbol == symbol
         and record.status == "observed"
         and isinstance(record.value, (int, float))
-        and re.search(r"\.periods\[0\]\.[^.]+$", record.field)
+        and re.search(r"\.periods\[\d+\]\.[^.]+$", record.field)
         and record.field.rsplit(".", 1)[-1].upper() in fields
     ]
     return max(candidates, key=lambda record: record.timestamp or "") if candidates else None
@@ -89,9 +89,9 @@ def decision_coverage(
         if record.tool == "get_a_share_valuation" and record.symbol == symbol
         and record.status == "observed"
     ]
-    quote = next((record for record in quotes if record.field == "data.last_price"
+    quote = next((record for record in reversed(quotes) if record.field == "data.last_price"
                   and isinstance(record.value, (int, float)) and record.value > 0), None)
-    multiple = next((record for record in quotes if record.field in {"data.pe_ttm", "data.pb"}
+    multiple = next((record for record in reversed(quotes) if record.field in {"data.pe_ttm", "data.pb"}
                      and isinstance(record.value, (int, float)) and record.value > 0), None)
     profit = _latest_financial_fact(records, symbol, _PROFIT_FIELDS)
     cash = _latest_financial_fact(records, symbol, _OPERATING_CASH_FIELDS)
@@ -117,6 +117,11 @@ def decision_coverage(
         "valuation_multiple": slot(multiple, "get_a_share_valuation"),
         "profitability": slot(profit, "get_financial_statements", "indicators"),
         "operating_cash_flow": slot(cash, "get_financial_statements", "cashflow"),
+        "financial_periods_match": (
+            bool(profit.timestamp and cash.timestamp)
+            and profit.timestamp[:10] == cash.timestamp[:10]
+            if profit is not None and cash is not None else None
+        ),
     }
     for key in ("profitability", "operating_cash_flow"):
         as_of = coverage[key]["as_of"]
@@ -335,6 +340,14 @@ def decision_issues(
                         issue("decision_report_date_omitted", f"State the report period {date_text} for observed {label} figures.")
             if (profit["status"] != "observed" or cash["status"] != "observed") and not _MISSING_RE.search(content):
                 issue("decision_missing_data_unspecified", "Name the missing profitability or cash-flow evidence explicitly.")
+            if coverage["financial_periods_match"] is False:
+                if stance == "favorable":
+                    issue(
+                        "decision_financial_period_mismatch",
+                        "Profit and operating cash flow refer to different report periods. Reconcile the periods before a favorable entry view; do not compare them as same-period evidence.",
+                    )
+                if confidence not in {"低", "low"}:
+                    issue("decision_confidence_overstated", "Financial report periods differ; use low confidence and disclose the mismatch.")
         if mainland_equity and not quote_attempted:
             issue(
                 "decision_raw_valuation_not_checked",

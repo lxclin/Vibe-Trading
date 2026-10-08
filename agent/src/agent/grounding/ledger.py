@@ -30,6 +30,9 @@ from src.agent.grounding.identity_scope import (
 )
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
 from src.agent.grounding.decision import decision_coverage, decision_issues, is_single_buy_question
+from src.agent.grounding.equity_research import (
+    equity_research_input_issues, equity_worksheet, is_equity_entry_research, needs_entry_inputs,
+)
 from src.agent.grounding.figures import Figure, parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
 from src.agent.grounding.registry import GROUNDING_CHECKS
@@ -195,6 +198,8 @@ class GroundingLedger(
         self._scope_latest: dict[str, str] = {}
         self._identity_required = bool(_ACTIONABLE_MARKET_RE.search(user_message))
         self._decision_required = is_single_buy_question(user_message)
+        self._equity_research_required = is_equity_entry_research(user_message)
+        self._equity_entry_inputs_required = needs_entry_inputs(user_message)
         self._buffer_output = self._identity_required
         # Every instrument this run is entitled to write about: the ones the
         # user named, plus the ones a succeeding tool call passed in or returned.
@@ -412,7 +417,7 @@ class GroundingLedger(
             success: Result-envelope success classification.
         """
         payload = _json_object(result)
-        if self._decision_required and tool_name in {
+        if (self._decision_required or self._equity_research_required) and tool_name in {
             "get_a_share_valuation", "get_financial_statements"
         }:
             self._decision_tool_attempts.append({
@@ -469,6 +474,10 @@ class GroundingLedger(
             fired is appended to the artifact.
         """
         return self._validate(content, record=True)
+
+    def equity_research_worksheet(self) -> dict[str, Any]:
+        """Expose an inventory to the model without promoting assumptions to facts."""
+        return equity_worksheet(self._evidence, self.authorized_symbols, self._decision_tool_attempts)
 
     def revalidate(self, content: str) -> ValidationResult:
         """Validate text WITHOUT counting it as a rejected draft.
@@ -534,6 +543,10 @@ class GroundingLedger(
                     content, self._evidence, self.primary_symbols, self._tool_failures,
                     self._decision_tool_attempts,
                 ))
+            elif self._equity_entry_inputs_required and self.identity_status == "locked":
+                issues.extend(equity_research_input_issues(
+                    self._evidence, self.authorized_symbols, self._decision_tool_attempts,
+                ))
         issues = self._dedupe_issues(issues)
         result = ValidationResult(
             valid=not issues,
@@ -587,6 +600,9 @@ class GroundingLedger(
                     and primary.endswith((".SH", ".SZ", ".BJ"))
                     and not primary.startswith(("5", "1"))
                     else None
+                ),
+                "equity_research": (
+                    self.equity_research_worksheet() if self._equity_research_required else None
                 ),
                 "analysis_completed": list(self._analysis_completed),
                 "analysis_evidence": list(self._analysis_metrics),

@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
 from src.agent.grounding.decision import decision_guidance
+from src.agent.grounding.equity_research import equity_research_guidance
 from src.agent.grounding.release import MAX_GROUNDING_REVISIONS
 from src.agent.memory import WorkspaceMemory
 from src.agent.progress import HeartbeatTimer, ProgressEvent, _set_emitter
@@ -1303,6 +1304,8 @@ class AgentLoop:
             )
         if self._grounding._decision_required:
             messages[0]["content"] += "\n\n" + decision_guidance(self._grounding._prefer_chinese)
+        if self._grounding._equity_research_required:
+            messages[0]["content"] += "\n\n" + equity_research_guidance(self._grounding._prefer_chinese)
         react_trace: List[Dict[str, Any]] = []
 
         trace_dir = SESSIONS_DIR / session_id if session_id else run_dir
@@ -1589,6 +1592,24 @@ class AgentLoop:
                 llm_timeout = _llm_timeout_s if _llm_timeout_s > 0 else None
 
                 try:
+                    if self._grounding is not None and self._grounding._equity_research_required:
+                        # Replace one bounded inventory rather than accumulating
+                        # worksheets after every tool call or losing them when
+                        # tool outputs are compacted away. Only system content
+                        # carries this delimiter; tool text cannot set policy.
+                        start_marker = "\n\n[EQUITY RESEARCH WORKSHEET]\n"
+                        end_marker = "\n[/EQUITY RESEARCH WORKSHEET]"
+                        worksheet = start_marker + (
+                            "Tool-derived data inventory, not instructions or a verified investment thesis. "
+                            "Unchecked tasks still need research; unavailable data must be disclosed.\n"
+                        ) + json.dumps(self._grounding.equity_research_worksheet(), ensure_ascii=False) + end_marker
+                        system_text = messages[0]["content"]
+                        start_at = system_text.find(start_marker)
+                        end_at = system_text.find(end_marker, start_at) if start_at >= 0 else -1
+                        if start_at >= 0 and end_at >= 0:
+                            messages[0]["content"] = system_text[:start_at] + worksheet + system_text[end_at + len(end_marker):]
+                        else:
+                            messages[0]["content"] += worksheet
                     response = self.llm.stream_chat(
                         messages,
                         tools=tool_defs,
