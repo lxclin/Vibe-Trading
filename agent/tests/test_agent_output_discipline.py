@@ -81,11 +81,13 @@ class TestOutputPrinciplesArePresent:
         assert "never invent a ticker" in prompt
         assert "never let recalled memory overwrite a value a tool" in prompt
 
-    def test_principle_four_is_analysis_not_advice(self) -> None:
+    def test_principle_four_gives_a_bounded_directional_research_view(self) -> None:
         prompt = _rendered_prompt()
 
-        assert "Analysis, not advice." in prompt
-        assert "Do not tell the user what to buy, sell, or hold" in prompt
+        assert "Clear research judgement, not a personal trade order." in prompt
+        assert "favorable, wait, or avoid" in prompt
+        assert "conditions that would change the view" in prompt
+        assert "Do not prescribe a position size" in prompt
 
     def test_principle_five_stops_when_enough_evidence(self) -> None:
         prompt = _rendered_prompt()
@@ -495,14 +497,15 @@ class TestTheSemanticPrinciplesStayInThePrompt:
 
         assert result.valid is True, result.issues
 
-    def test_the_prompt_still_carries_all_five(self) -> None:
+    def test_the_prompt_still_carries_all_six(self) -> None:
         prompt = _rendered_prompt()
 
         for principle in (
             "Every number points at a tool.",
             "Every data point carries its as-of.",
             "What the tools did not return, you do not supply.",
-            "Analysis, not advice.",
+            "Clear research judgement, not a personal trade order.",
+            "Answer at the level of detail asked; stop when you have enough.",
             "Refuse out loud, never silently.",
         ):
             assert principle in prompt

@@ -447,6 +447,19 @@ class _ReleaseMixin:
             for validation in self._validations
             for code in (issue.get("code") for issue in validation.get("issues", []))
         }
+        issues = [issue for validation in self._validations for issue in validation.get("issues", [])]
+        if issues and all(issue.get("reason") in {
+            "unknown_call_id", "field_ref_needs_call_id", "ambiguous_field_ref",
+        } for issue in issues):
+            if is_zh:
+                return (
+                    "本轮已取得数据，但报告中的数据引用未能与工具记录唯一对应，"
+                    "因此未发布完整结论。这是报告引用校验失败，不代表没有获取行情。"
+                )
+            return (
+                "Data was retrieved, but the report's references could not be uniquely "
+                "matched to the tool records, so the complete conclusion was not released."
+            )
         if issue_codes & _REDACTABLE_CODES and not self._analysis_completed:
             if is_zh:
                 return (

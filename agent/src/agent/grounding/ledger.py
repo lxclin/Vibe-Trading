@@ -25,6 +25,8 @@ from src.agent.grounding.identity_scope import (
     _BARE_LISTED_CODE_RE,
     _REFERENTIAL_FOLLOWUP_RE,
     _TRADE_MANAGEMENT_FOLLOWUP_RE,
+    _COMPARISON_FOLLOWUP_RE,
+    _SCREENING_REQUEST_RE,
 )
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
 from src.agent.grounding.decision import decision_coverage, decision_issues, is_single_buy_question
@@ -96,11 +98,6 @@ _ACTIONABLE_MARKET_RE = re.compile(
 _CRYPTO_CONFIRMATION_RE = re.compile(
     r"(?:虚拟货币|加密货币|数字货币|代币|交易对|token(?:s)?|crypto(?:currency)?|"
     r"trading\s+pair)",
-    re.IGNORECASE,
-)
-_SCREENING_REQUEST_RE = re.compile(
-    r"(?:推荐|筛选|选股|股票池|候选|低价|高增长|高股息|top\s*\d+|screen|shortlist|"
-    r"find\s+(?:stocks?|funds?))",
     re.IGNORECASE,
 )
 _META_DELIVERY_RE = re.compile(
@@ -217,6 +214,7 @@ class GroundingLedger(
         if not self._identities and (
             _REFERENTIAL_FOLLOWUP_RE.fullmatch(user_message or "")
             or _TRADE_MANAGEMENT_FOLLOWUP_RE.fullmatch(user_message or "")
+            or _COMPARISON_FOLLOWUP_RE.match(user_message or "")
         ):
             self._seed_followup_history(history or [])
         elif self._identity_required and not self._screening_request and not self._identities:
@@ -289,7 +287,15 @@ class GroundingLedger(
                     "请告诉我具体平台、交易所或完整交易对，再继续查询行情。"
                 )
             if source_failed:
-                return "标的搜索数据源暂时不可用，无法核验证券代码。请稍后重试，或直接提供证券代码。"
+                queries = "、".join(dict.fromkeys(
+                    record.query[:80] for record in self._identities.values()
+                    if record.status == "invalidated" and record.query
+                ))
+                subject = f"“{queries}”" if queries else "这个名称"
+                return (
+                    f"暂未核实{subject}对应的证券代码，部分标的搜索数据源暂时不可用。"
+                    "请核对名称是否有错别字，或提供证券代码；目前不能据此认定该标的不存在。"
+                )
             return "我还不能确认唯一的交易标的。请提供具体平台、交易所或完整交易对。"
         if labels:
             return (
@@ -496,7 +502,7 @@ class GroundingLedger(
             A deterministic validation result.
         """
         self._ingest_run_dir_ohlc_csvs()
-        block = parse_figures_block(content)
+        block = self._normalize_provider_refs(parse_figures_block(content))
         figures = scan_figures(content, block)
         issues: list[dict[str, Any]] = []
         if (

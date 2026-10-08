@@ -11,7 +11,7 @@ import ast
 import json
 import math
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -460,6 +460,36 @@ class _PolicyMixin:
             )
         issues.extend(GROUNDING_CHECKS.run("listed-identity-relabelled-private", self, content))
         return issues
+
+    def _normalize_provider_refs(self, block: FiguresBlock) -> FiguresBlock:
+        """Resolve a unique Responses call ID to its stored call/item pair.
+
+        Codex stores ``call_x|fc_y`` for transport replay, while the model sees
+        ``call_x``. Only this exact provider format is recognized. Arbitrary
+        aliases, duplicate call IDs, field paths and values remain unchecked
+        here and must pass the usual validation below.
+        """
+        call_ids = {record.call_id for record in self._evidence}
+        call_ids.update(entry.get("call_id") for entry in self._analysis_metrics)
+        aliases: dict[str, set[str]] = {}
+        for stored in call_ids:
+            if isinstance(stored, str) and re.fullmatch(r"call_[A-Za-z0-9_]+\|fc_[A-Za-z0-9_]+", stored):
+                aliases.setdefault(stored.split("|", 1)[0], set()).add(stored)
+
+        def normalize(ref: str) -> str:
+            parts = re.split(r"([;,])", ref)
+            for index in range(0, len(parts), 2):
+                key = parts[index].strip()
+                scope, separator, path = key.partition("::")
+                matches = aliases.get(scope, set())
+                if scope not in call_ids and len(matches) == 1:
+                    parts[index] = next(iter(matches)) + separator + path
+            return "".join(parts)
+
+        return replace(block, declarations=tuple(
+            replace(declaration, ref=normalize(declaration.ref))
+            for declaration in block.declarations
+        ))
 
     def _validate_figures(
         self,

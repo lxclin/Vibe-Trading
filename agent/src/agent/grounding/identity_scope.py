@@ -61,8 +61,16 @@ _CRYPTO_REQUEST_RE = re.compile(
 )
 
 _SCREENING_REQUEST_RE = re.compile(
-    r"(?:推荐|筛选|选股|股票池|候选|低价|高增长|高股息|top\s*\d+|screen|shortlist|find\s+(?:stocks?|funds?))",
+    r"(?:推荐|筛选|选股|股票池|候选|低价|高增长|高股息|"
+    r"(?:其他|别的|更好|替代)[^。！？\n]{0,10}(?:标的|股票|ETF|基金)|"
+    r"top\s*\d+|screen|shortlist|find\s+(?:stocks?|funds?))",
     re.IGNORECASE,
+)
+
+_COMPARISON_FOLLOWUP_RE = re.compile(
+    r"^(?=.{0,80}(?:这只|这个|该)(?:股票|基金|ETF|标的))"
+    r"(?=.{0,140}(?:其他|别的|更好|替代|比较|对比)).+",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -261,6 +269,23 @@ class IdentityScopeMixin:
             # the only exception: it applies when the failed query is the
             # same symbol as an older lock and the user is managing a fill.
             if summary.get("status") != "locked":
+                # A retry of the same alternatives question may follow a
+                # failed peer lookup. Skip only that exact failed question;
+                # never walk through a genuine intervening subject change.
+                if summary.get("status") == "invalidated" and _COMPARISON_FOLLOWUP_RE.match(self.user_message):
+                    preceding_user = next((
+                        prior for prior in reversed_history[position + 1:]
+                        if str(prior.get("role") or "").casefold() == "user"
+                    ), None)
+                    failed = summary.get("records") or []
+                    if (
+                        preceding_user and preceding_user.get("content") == self.user_message
+                        and failed and all(
+                            isinstance(raw, Mapping) and raw.get("status") == "invalidated"
+                            and not raw.get("candidates") for raw in failed
+                        )
+                    ):
+                        continue
                 # Older runs did not persist a primary-symbol scope.  If such
                 # a run ended with a mixed/ambiguous summary, recover only the
                 # single locked record matching the immediately preceding
@@ -411,6 +436,8 @@ class IdentityScopeMixin:
                 }
                 inherited_scope = matched if len(matched) == 1 else set()
             if not inherited_scope:
+                return
+            if _COMPARISON_FOLLOWUP_RE.match(self.user_message) and len(inherited_scope) != 1:
                 return
             for raw_record in records:
                 if not isinstance(raw_record, Mapping):

@@ -17,6 +17,66 @@ _LOCKED = {
 }
 _ANSWER = "紫金矿业 601899.SH 收于29.46元；华夏黄金ETF 518850.SH 收于8.607元。"
 
+_ALTERNATIVES = "你是觉得这只股票的标的不怎么样吗，是否有别的好的标的，胜率更高，比如黄金相关的标的、紫晶矿业、山东黄金等"
+_HOLDING = {
+    "status": "locked", "authorized_symbols": ["513330.SH"],
+    "primary_symbols": ["513330.SH"],
+    "records": [{"status": "locked", "symbol": "513330.SH", "currency": "CNY"}],
+}
+
+
+def _failed_name(ledger: GroundingLedger) -> None:
+    ledger.ingest_tool_result(
+        tool_name="search_symbol", arguments={"query": "紫晶矿业"},
+        result=json.dumps({"ok": True, "data": {"query": "紫晶矿业", "candidates": [],
+                           "sources": {"eastmoney": "search failed", "sse": "ok", "szse": "ok"}}}),
+        call_id="failed_peer", success=True,
+    )
+
+
+def test_alternatives_preserve_unique_current_subject_and_continue_other_candidates(tmp_path: Path) -> None:
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=_ALTERNATIVES, history=[
+        {"role": "assistant", "content": "持仓513330.SH", "grounding_identity": _HOLDING},
+    ])
+    assert ledger.inherited_symbols == {"513330.SH"}
+    _failed_name(ledger)
+    assert not ledger.should_request_user_confirmation
+    assert ledger.authorized_symbols == {"513330.SH"}
+    ledger.ingest_tool_result(
+        tool_name="search_symbol", arguments={"query": "山东黄金"},
+        result=json.dumps({"ok": True, "data": {"query": "山东黄金", "candidates": [
+            {"symbol": "600547.SH", "name": "山东黄金", "exchange": "SH", "market": "cn", "source": "sse"},
+        ], "sources": {"sse": "ok"}}}), call_id="other_peer", success=True,
+    )
+    assert ledger.authorized_symbols == {"513330.SH", "600547.SH"}
+    assert "601899.SH" not in ledger.authorized_symbols  # No silent typo correction.
+
+
+def test_alternatives_without_history_do_not_stop_after_one_failed_candidate(tmp_path: Path) -> None:
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=_ALTERNATIVES)
+    _failed_name(ledger)
+    assert not ledger.should_request_user_confirmation
+    assert not ledger.authorized_symbols
+
+
+def test_retry_of_failed_alternatives_recovers_original_subject(tmp_path: Path) -> None:
+    failed = {"status": "invalidated", "authorized_symbols": [], "records": [
+        {"status": "invalidated", "query": "紫晶矿业", "candidates": []},
+    ]}
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=_ALTERNATIVES, history=[
+        {"role": "assistant", "grounding_identity": _HOLDING},
+        {"role": "user", "content": _ALTERNATIVES},
+        {"role": "assistant", "content": "查询失败", "grounding_identity": failed},
+    ])
+    assert ledger.inherited_symbols == {"513330.SH"}
+
+
+def test_alternatives_cannot_choose_among_multiple_prior_primary_symbols(tmp_path: Path) -> None:
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=_ALTERNATIVES, history=[
+        {"role": "assistant", "content": _ANSWER, "grounding_identity": _LOCKED},
+    ])
+    assert not ledger.inherited_symbols
+
 
 def test_named_followup_inherits_only_the_named_instrument(tmp_path: Path) -> None:
     ledger = GroundingLedger(

@@ -1279,6 +1279,14 @@ class AgentLoop:
             "100000000. If research reports include dated broker ratings, summarize "
             "those observed reports with their dates and broker names rather than "
             "calling the information unavailable."
+            " For alternatives or screening questions, resolve each named candidate "
+            "independently. One failed candidate lookup must not end research on other "
+            "candidates or the verified current subject. A likely misspelling is a "
+            "hypothesis: search the corrected name separately and disclose the assumed "
+            "correction or ask the user to confirm; never silently substitute a ticker. "
+            "If some candidates remain unresolved, report that limitation by name and "
+            "continue with the verified ones. Do not claim a higher win rate without "
+            "a defined horizon and supporting evidence."
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] += "\n\n" + grounding_contract

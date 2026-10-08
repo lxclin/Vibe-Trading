@@ -140,6 +140,10 @@ def test_only_real_readable_duplicate_keeps_lock(
     harness, monkeypatch, compact, duplicate
 ):
     h = harness
+    # Exercise ordinary repeatable tools. Financial statements deliberately
+    # remain stable within a run even when their tool definition is repeatable.
+    h.tool.name = "repeatable_readonly_query"
+    h.agent.registry.register(h.tool)
     args = {"statement": "income"}
     original = h.call(args)
     if duplicate != "skipped":
@@ -275,6 +279,8 @@ def test_replayable_repeatable_result_restores_gate_after_one_replay(harness):
 
 def test_readable_cached_duplicate_keeps_exact_key_locked(harness):
     h = harness
+    h.tool.name = "repeatable_readonly_query"
+    h.agent.registry.register(h.tool)
     # A repeatable deterministic tool can have two successful readable copies,
     # including one served by the cache, before the gate becomes applicable.
     h.tool.repeatable = True
@@ -291,6 +297,16 @@ def test_readable_cached_duplicate_keeps_exact_key_locked(harness):
     assert h.tool.name not in reopened
     result = h.call({"statement": "income"})
     assert json.loads(result["content"])["skipped"] is True
+    assert len(h.tool.calls) == 1
+
+
+def test_run_stable_financial_query_does_not_refetch_when_marked_repeatable(harness):
+    h = harness
+    h.tool.repeatable = True
+    original = h.call({"statement": "income"})
+    duplicate = h.call({"statement": "income"})
+    assert json.loads(original["content"])["status"] == "ok"
+    assert json.loads(duplicate["content"])["skipped"] is True
     assert len(h.tool.calls) == 1
 
 
