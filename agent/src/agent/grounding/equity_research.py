@@ -20,9 +20,9 @@ _RESEARCH_RE = re.compile(
     r"\b(?:buy|valuation|undervalued|overvalued|earnings quality|better investment)\b",
     re.IGNORECASE,
 )
-_META_RE = re.compile(r"提示词|怎么问|如何提问|代码|程序|项目|prompt|bug", re.IGNORECASE)
+_META_RE = re.compile(r"提示词|怎么问|如何提问|编写代码|代码实现|代码怎么写|修改代码|修复代码|程序|项目|prompt|bug", re.IGNORECASE)
 _ENTRY_RE = re.compile(
-    r"买入|值得买|能买吗|买什么|推荐.{0,6}买|胜率|(?:更好|别的)[^。！？\n]{0,8}标的|"
+    r"买入|值得买|能买吗|买什么|推荐我.{0,6}买(?:什么|哪)|胜率|(?:更好|别的)[^。！？\n]{0,8}标的|"
     r"\b(?:buy|worth buying|better investment)\b",
     re.IGNORECASE,
 )
@@ -50,7 +50,10 @@ def is_mainland_company(symbol: str) -> bool:
 
 def needs_entry_inputs(question: str) -> bool:
     """A quote/ratio lookup alone should not trigger full investment research."""
-    return is_equity_entry_research(question) and bool(_ENTRY_RE.search(question))
+    # A request to display a price/level or a screening shortlist is not itself
+    # a thesis about buying a named company at today's price.
+    intent = re.sub(r"买入价(?:格)?|买入点位|入场价(?:格)?|入场点位", "", question)
+    return is_equity_entry_research(question) and bool(_ENTRY_RE.search(intent))
 
 
 def _observed(record: Any) -> bool:

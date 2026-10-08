@@ -8,6 +8,7 @@ when this run never obtained either prices or company financials.
 from __future__ import annotations
 
 import re
+import math
 from datetime import date, datetime
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
@@ -16,16 +17,16 @@ from zoneinfo import ZoneInfo
 _BUY_QUESTION_RE = re.compile(
     r"值得(?:现在)?买入|值得买吗|能否买入|能买吗|适合买入|是否(?:值得)?买入|"
     r"现在(?:能|该|要不要)买|买入时机|"
-    r"推荐.{0,6}(?:现在)?买|什么时候[^。！？\n]{0,25}买入|什么指标[^。！？\n]{0,25}买入|"
+    r"推荐我.{0,6}买(?:什么|哪)|什么时候[^。！？\n]{0,25}买入|什么指标[^。！？\n]{0,25}买入|"
     r"\b(?:should I buy|worth buying|buy now|good time to buy)\b",
     re.IGNORECASE,
 )
 _META_OR_COMPARISON_RE = re.compile(
-    r"怎么问|如何提问|提示词|prompt|项目|系统|模型|代码|ETF|基金|"
+    r"怎么问|如何提问|提示词|prompt|项目|系统|模型|编写代码|代码实现|代码怎么写|修改代码|修复代码|ETF|基金|"
     r"哪个更|哪只更|对比|比较|\b(?:compare|versus|vs\.?|how to ask)\b",
     re.IGNORECASE,
 )
-_STANCE_RE = re.compile(r"(?:研究)?结论\s*[:：]\s*([^\n。；;]{1,100})", re.IGNORECASE)
+_STANCE_RE = re.compile(r"(?:研究)?结论(?:仍)?(?:为)?\s*[:：]\s*([^\n。；;]{1,100})", re.IGNORECASE)
 _ENGLISH_STANCE_RE = re.compile(r"\b(?:research )?(?:verdict|conclusion)\s*:\s*([^\n.;]{1,100})", re.IGNORECASE)
 _HORIZON_RE = re.compile(
     r"(?:持有|分析|判断)?期限\s*[:：]\s*[*_`~\s]*(?:未来|短线|中线|长线|\d+\s*(?:[—–-]\s*\d+\s*)?(?:天|周|月|年))|"
@@ -33,8 +34,8 @@ _HORIZON_RE = re.compile(
     re.IGNORECASE,
 )
 _CONFIDENCE_RE = re.compile(r"(?:信心|置信度)\s*[:：]\s*(?:高|中|低)|\bconfidence\s*:\s*(?:high|medium|low)\b", re.IGNORECASE)
-_RATIONALE_RE = re.compile(r"(?:主要|核心)?依据\s*[:：]|\b(?:key evidence|rationale)\s*:", re.IGNORECASE)
-_CHANGE_RE = re.compile(r"改变判断的条件|判断.{0,8}(?:改变|失效)|失效条件|\b(?:what changes the view|invalidation conditions?)\b", re.IGNORECASE)
+_RATIONALE_RE = re.compile(r"(?:主要|核心)?依据\s*[:：]|(?:盈利质量|已有证据|核验结果)\s*[:：]|\b(?:key evidence|rationale)\s*:", re.IGNORECASE)
+_CHANGE_RE = re.compile(r"改变判断的条件|判断.{0,8}(?:改变|失效)|失效条件|入场条件|买入条件|什么时候值得考虑买入|\b(?:what changes the view|invalidation conditions?)\b", re.IGNORECASE)
 _MISSING_RE = re.compile(r"缺少|缺失|未取得|未获取|未核验|无法获取|数据不足|\b(?:missing|unavailable|not retrieved)\b", re.IGNORECASE)
 _ADJUSTMENT_RE = re.compile(r"复权|调整后|adjusted|dividend.adjusted", re.IGNORECASE)
 _HISTORICAL_PRICE_RE = re.compile(r"收盘价|历史价格|日线价|closing price|historical close", re.IGNORECASE)
@@ -70,6 +71,13 @@ _MAX_REPORT_AGE_DAYS = 270
 
 def _latest_financial_fact(records: Sequence[Any], symbol: str, fields: frozenset[str]) -> Any | None:
     """Return a relevant numeric fact from the latest reported period."""
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    def usable(record: Any) -> bool:
+        try:
+            return (not isinstance(record.value, bool) and math.isfinite(record.value)
+                    and date.fromisoformat(str(record.timestamp)[:10]) <= today)
+        except (TypeError, ValueError, OverflowError):
+            return False
     candidates = [
         record for record in records
         if record.tool == "get_financial_statements"
@@ -78,6 +86,7 @@ def _latest_financial_fact(records: Sequence[Any], symbol: str, fields: frozense
         and isinstance(record.value, (int, float))
         and re.search(r"\.periods\[\d+\]\.[^.]+$", record.field)
         and record.field.rsplit(".", 1)[-1].upper() in fields
+        and usable(record)
     ]
     return max(candidates, key=lambda record: record.timestamp or "") if candidates else None
 
@@ -105,13 +114,14 @@ def decision_coverage(
     def slot(record: Any | None, tool: str, statement: str | None = None) -> dict[str, Any]:
         matching = [attempt for attempt in relevant_attempts if attempt.get("tool") == tool
                     and (statement is None or attempt.get("statement") == statement)]
+        attempted = bool(matching) or record is not None or (tool == "get_a_share_valuation" and bool(quotes))
         return {
-            "status": "observed" if record is not None else ("unavailable" if matching else "unchecked"),
+            "status": "observed" if record is not None else ("unavailable" if attempted else "unchecked"),
             "field": record.field if record is not None else None,
             "as_of": record.timestamp if record is not None else None,
             "source": record.source if record is not None else None,
             "report_period": getattr(record, "report_period", None) if record is not None else None,
-            "attempted": bool(matching) or record is not None,
+            "attempted": attempted,
             "quarter_attempted": any(attempt.get("period") == "quarter" for attempt in matching),
         }
     coverage = {
@@ -126,15 +136,6 @@ def decision_coverage(
             if profit is not None and cash is not None else None
         ),
     }
-    critical = [key for key in ("raw_quote", "valuation_multiple", "profitability", "operating_cash_flow")
-                if coverage[key]["status"] != "observed"]
-    if coverage["financial_periods_match"] is False:
-        critical.append("matching_financial_periods")
-    coverage["entry_evidence"] = {
-        "status": "incomplete" if critical else "minimum_inputs_observed",
-        "gaps": critical,
-        "boundary": "Minimum inputs are not proof of fair value or a buy thesis. Missing data is not bearish evidence.",
-    }
     for key in ("profitability", "operating_cash_flow"):
         as_of = coverage[key]["as_of"]
         if not as_of:
@@ -146,6 +147,15 @@ def decision_coverage(
             continue
         age = (datetime.now(ZoneInfo("Asia/Shanghai")).date() - report_date).days
         coverage[key]["freshness"] = "stale" if age > _MAX_REPORT_AGE_DAYS else "current"
+    critical = [key for key in ("raw_quote", "valuation_multiple", "profitability", "operating_cash_flow")
+                if coverage[key]["status"] != "observed" or coverage[key].get("freshness") == "stale"]
+    if coverage["financial_periods_match"] is False:
+        critical.append("matching_financial_periods")
+    coverage["entry_evidence"] = {
+        "status": "incomplete" if critical else "minimum_inputs_observed",
+        "gaps": critical,
+        "boundary": "Minimum inputs are not proof of fair value or a buy thesis. Missing data is not bearish evidence.",
+    }
     return coverage
 
 

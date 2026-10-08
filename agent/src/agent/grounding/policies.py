@@ -54,6 +54,27 @@ _MAX_CONTAINER_REF_CANDIDATES = 5
 _MAX_CALL_REF_CANDIDATES = 5
 
 
+def _is_report_eps(record: EvidenceRecord) -> bool:
+    """Broker EPS is money per share, but must never become a traded price."""
+    return record.tool == "get_research_reports" and bool(re.fullmatch(
+        r"data\.reports\[\d+\]\.eps_forecast\.(?:this_year|next_year)", record.field,
+    ))
+
+
+_STATEMENT_MONEY_FIELDS = frozenset({
+    "PARENTNETPROFIT", "PARENT_NETPROFIT", "NETPROFIT", "KCFJCXSYJLR", "DEDUCT_PARENT_NETPROFIT",
+    "TOTALOPERATEREVE", "OPERATE_INCOME", "OPERATE_COST", "OPERATE_PROFIT", "NETCASH_OPERATE", "NETCASH_OPERATE_PK",
+    "CONSTRUCT_LONG_ASSET", "INVEST_INCOME", "FAIRVALUE_CHANGE_INCOME", "ASSET_IMPAIRMENT_INCOME",
+    "CREDIT_IMPAIRMENT_INCOME", "MINORITY_INTEREST", "EPSJB", "BPS", "PER_NETASSET",
+})
+
+
+def _is_statement_money(record: EvidenceRecord) -> bool:
+    """Explicit monetary account fields; ratios and growth rates are excluded."""
+    return (record.tool == "get_financial_statements"
+            and record.field.rsplit(".", 1)[-1].upper() in _STATEMENT_MONEY_FIELDS)
+
+
 def _index_normalized(path: str) -> str:
     """Spell dotted collection indices with brackets (``a.0.b`` -> ``a[0].b``)."""
     return _DOTTED_INDEX_RE.sub(r"[\1]", path)
@@ -531,28 +552,30 @@ class _PolicyMixin:
             symbol = next(iter(symbols))
             scope, separator, field_ref = ref.partition("::")
             field_ref = field_ref if separator else scope
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field_ref):
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.\[\]]*", field_ref):
                 return replace(declaration, ref=ref)
-            if separator and scope not in {"get_financial_statements", "get_a_share_valuation"}:
+            allowed_tools = {"get_financial_statements", "get_a_share_valuation", "get_research_reports"}
+            if separator and scope not in allowed_tools:
                 return replace(declaration, ref=ref)
             records = [
                 record for record in self._evidence
                 if record.status == "observed" and record.symbol == symbol
-                and record.field.rsplit(".", 1)[-1] == field_ref
-                and record.tool in {"get_financial_statements", "get_a_share_valuation"}
+                and (record.field == field_ref or ("." not in field_ref
+                     and record.field.rsplit(".", 1)[-1] == field_ref))
+                and record.tool in allowed_tools
                 and (not separator or record.tool == scope)
             ]
             # Financial bare fields can span multiple report periods. Require
             # an explicit ISO date in the declaration and one exact match;
             # announcement dates can coexist with the reporting date.
             dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
-            if not separator or scope == "get_financial_statements":
+            if not separator or (scope == "get_financial_statements" and dates):
                 records = [
                     record for record in records
                     if record.tool == "get_financial_statements"
                     and record.timestamp and record.timestamp[:10] in dates
                 ]
-            elif dates:
+            elif dates and scope == "get_a_share_valuation":
                 records = [
                     record for record in records
                     if record.timestamp and record.timestamp[:10] in dates
@@ -977,7 +1000,7 @@ class _PolicyMixin:
         elif figure is not None and figure.currency:
             records = [
                 record for record in records
-                if _is_price_kind(record) or record.tool == "get_financial_statements"
+                if _is_price_kind(record) or record.tool == "get_financial_statements" or _is_report_eps(record)
             ]
             metrics = []
         return records, metrics
@@ -1951,12 +1974,18 @@ class _PolicyMixin:
                 anchors += self._metric_pool(symbol)
         # Arithmetic across two runs needs both runs' values: a field ref that
         # names several sources anchors all of them instead of none.
-        scoped = self._referenced(declaration.ref, symbol, None, pool_ambiguous=True)
-        if scoped is not None:
+        refs = [ref.strip() for ref in re.split(r"[;,，；]", declaration.ref) if ref.strip()]
+        scopes = [self._referenced(ref, symbol, None, pool_ambiguous=True) for ref in refs]
+        if len(refs) > 1 and any(scope is None for scope in scopes):
+            return "no_evidence"
+        for scoped in scopes:
+            if scoped is None:
+                continue
             anchors.extend(
                 float(record.value)
                 for record in scoped[0]
-                if (not money or _is_price_kind(record)) and not (unattributed and record.symbol)
+                if (not money or _is_price_kind(record) or _is_report_eps(record) or _is_statement_money(record))
+                and not (unattributed and record.symbol)
             )
             if not money and not unattributed:
                 anchors.extend(scoped[1])
