@@ -25,6 +25,22 @@ describe("generated report download", () => {
 });
 
 describe("api request helper", () => {
+  it("preserves the active attempt when a session is busy", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: { code: "session_busy", attempt_id: "running-attempt", message: "Still running" },
+    }), { status: 409, headers: { "content-type": "application/json" } })));
+    const { api, isSessionBusyError } = await loadApiModule();
+    const error = await api.sendMessage("session", "follow up").catch((err: unknown) => err);
+    expect(error).toMatchObject({ status: 409, code: "session_busy", attemptId: "running-attempt" });
+    expect(isSessionBusyError(error)).toBe(true);
+  });
+
+  it("does not treat unrelated conflicts as a running session", async () => {
+    const { ApiError, isSessionBusyError } = await loadApiModule();
+    expect(isSessionBusyError(new ApiError("configuration conflict", 409))).toBe(false);
+    expect(isSessionBusyError(new ApiError("Session x already has a run in progress", 409))).toBe(true);
+  });
+
   it("translates the server's message-size error into a recovery instruction", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       detail: { code: "message_too_long", max_length: 100_000, message: "Shorten input" },

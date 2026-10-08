@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ApiError } from "@/lib/api";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { Agent } from "../Agent";
 import { useAgentStore } from "@/stores/agent";
@@ -8,6 +9,7 @@ const apiMock = vi.hoisted(() => ({
   getLLMSettings: vi.fn(),
   getRun: vi.fn(),
   getSessionMessages: vi.fn(),
+  sendMessage: vi.fn(),
   sseUrl: vi.fn((sid: string) => `/sessions/${sid}/events`),
 }));
 
@@ -90,6 +92,7 @@ async function renderLoadedFirstSession() {
 
 describe("Agent runtime identity session transitions", () => {
   beforeEach(() => {
+    apiMock.sendMessage.mockReset();
     useAgentStore.getState().reset();
     apiMock.getGoal.mockResolvedValue(null);
     apiMock.getLLMSettings.mockResolvedValue({
@@ -113,6 +116,54 @@ describe("Agent runtime identity session transitions", () => {
       configurable: true,
       value: vi.fn(),
     });
+  });
+
+  it.each([false, true])("recovers a busy request without a false send failure (completed=%s)", async (completed) => {
+    await renderLoadedFirstSession();
+    const attemptId = "previous-running-attempt";
+    act(() => {
+      useAgentStore.getState().addMessage({
+        type: "tool_call", content: "", timestamp: Date.now(),
+        meta: { activity: { attemptId, state: "timeout", verb: "working", steps: [], startedAt: Date.now() - 100_000 } },
+      });
+    });
+    const reply = { ...storedReply("session-one"), linked_attempt_id: attemptId };
+    apiMock.getSessionMessages.mockResolvedValue(completed ? [reply] : []);
+    apiMock.sendMessage.mockRejectedValue(new ApiError("Still running", 409, "session_busy", attemptId));
+    const textbox = screen.getByRole("textbox");
+    fireEvent.change(textbox, { target: { value: "Can I buy now?" } });
+    fireEvent.keyDown(textbox, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(apiMock.sendMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      const state = useAgentStore.getState();
+      expect(state.status).toBe(completed ? "idle" : "streaming");
+      expect(state.messages.some((m) => m.type === "error")).toBe(false);
+      expect(state.messages.some((m) => m.type === "user" && m.content === "Can I buy now?")).toBe(false);
+      if (!completed) expect(state.activity?.attemptId).toBe(attemptId);
+      expect(textbox).toHaveValue("Can I buy now?");
+    });
+    expect(apiMock.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restore a busy run into a different session", async () => {
+    const { router } = await renderLoadedFirstSession();
+    const pending = deferred<never>();
+    apiMock.sendMessage.mockReturnValue(pending.promise);
+    const textbox = screen.getByRole("textbox");
+    fireEvent.change(textbox, { target: { value: "follow up" } });
+    fireEvent.keyDown(textbox, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(apiMock.sendMessage).toHaveBeenCalledTimes(1));
+    await act(async () => { await router.navigate("/?session=busy-other-session"); });
+    await act(async () => { pending.reject(new ApiError("Still running", 409, "session_busy", "old-attempt")); });
+    await waitFor(() => {
+      const state = useAgentStore.getState();
+      expect(state.sessionId).toBe("busy-other-session");
+      expect(state.status).toBe("idle");
+      expect(state.activity).toBeNull();
+      expect(state.messages.some((message) => message.type === "error")).toBe(false);
+    });
+    expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
   it("hides the previous identity while the next session load is still pending", async () => {

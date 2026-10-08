@@ -766,7 +766,12 @@ def register_sessions_routes(app: FastAPI) -> None:
         except SessionBusyError as exc:
             # Must precede ValueError-style handling and stay distinct from 404:
             # the session exists, it is simply already running.
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            session = svc.get_session(session_id)
+            raise HTTPException(status_code=409, detail={
+                "code": "session_busy",
+                "message": "The previous request is still running. Wait for it or stop it before sending another message.",
+                "attempt_id": session.last_attempt_id if session else None,
+            }) from exc
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
 

@@ -2,12 +2,14 @@
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 import api_server
 from src.api.sessions_routes import MAX_MESSAGE_CHARS
+from src.session.service import SessionBusyError
 
 
 @pytest.fixture
@@ -39,6 +41,21 @@ def test_empty_prompt_keeps_normal_validation(client):
     response = client.post("/sessions/nosuch/messages", json={"content": ""})
     assert response.status_code == 422
     assert response.json()["detail"][0]["type"] == "string_too_short"
+
+
+def test_busy_session_returns_recoverable_attempt_identity(client, monkeypatch):
+    class BusyService:
+        async def send_message(self, **kwargs):
+            raise SessionBusyError("already running")
+
+        def get_session(self, session_id):
+            return SimpleNamespace(last_attempt_id="original-attempt")
+
+    monkeypatch.setattr(api_server, "_get_session_service", lambda: BusyService())
+    response = client.post("/sessions/busy/messages", json={"content": "new message"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "session_busy"
+    assert response.json()["detail"]["attempt_id"] == "original-attempt"
 
 
 def test_frontend_message_bound_matches_the_server_schema():

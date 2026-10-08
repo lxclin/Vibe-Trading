@@ -11,7 +11,7 @@ import {
   type StoredAgentMessage,
 } from "@/stores/agent";
 import { useSSE } from "@/hooks/useSSE";
-import { ApiError, AUTH_REQUIRED_MESSAGE, api, isAuthRequiredError, type GoalSnapshot, type MandateProposal, type MandateCommitted, type ScheduledResearchProposal, type LiveAction, type LiveHalted, type LLMSettings } from "@/lib/api";
+import { ApiError, AUTH_REQUIRED_MESSAGE, api, isAuthRequiredError, isSessionBusyError, type GoalSnapshot, type MandateProposal, type MandateCommitted, type ScheduledResearchProposal, type LiveAction, type LiveHalted, type LLMSettings } from "@/lib/api";
 import {
   extractUploadedAttachments,
 } from "@/lib/attachments";
@@ -686,9 +686,9 @@ export function Agent() {
     await loadSessionMessages(sid, gen);
   }, [loadSessionMessages]);
 
-  const syncCompletedAttempt = useCallback(async (sid: string, attemptId?: string) => {
+  const syncCompletedAttempt = useCallback(async (sid: string, attemptId?: string, maxChecks = 3) => {
     if (!attemptId) return false;
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < maxChecks; i += 1) {
       try {
         const storedMessages = await api.getSessionMessages(sid);
         const completed = storedMessages.some(
@@ -707,7 +707,7 @@ export function Agent() {
       } catch {
         return false;
       }
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 800));
+      if (i + 1 < maxChecks) await new Promise<void>((resolve) => window.setTimeout(resolve, 800));
     }
     return false;
   }, [clearStreamingView, markBackgroundCompletion, refreshSessionMessages]);
@@ -1487,6 +1487,32 @@ export function Agent() {
     return () => clearInterval(timer);
   }, [archiveActivity, flushPendingStreamUpdate, persistPartialAnswer, status, t]);
 
+  const recoverBusySession = useCallback(async (error: unknown, prompt: string, sid: string | null) => {
+    if (!isSessionBusyError(error)) return false;
+    promptSubmissionLockRef.current = false;
+    if (!sid || act().sessionId !== sid) return true;
+    clearStreamingView();
+    useAgentStore.setState({ activity: null, toolCalls: [] });
+    act().setStatus("idle");
+    composerRef.current?.fill(prompt);
+    toast.info(t('agent.sessionBusy'));
+    const previous = [...act().messages].reverse().find(
+      (message) => message.meta?.activity && !message.meta.activity.attemptId.startsWith("pending-"),
+    )?.meta?.activity;
+    const attemptId = error.attemptId || previous?.attemptId;
+    // A 409 stores no user message. Reload durable history to remove the
+    // optimistic duplicate, then restore the original run instead of retrying.
+    await refreshSessionMessages(sid);
+    if (act().sessionId !== sid) return true;
+    if (attemptId && await syncCompletedAttempt(sid, attemptId, 1)) return true;
+    if (act().sessionId !== sid || !attemptId) return true;
+    act().startActivity(attemptId, previous?.attemptId === attemptId ? previous.startedAt : undefined);
+    act().setStatus("streaming");
+    sseSessionRef.current = null;
+    setupSSE(sid);
+    return true;
+  }, [clearStreamingView, refreshSessionMessages, setupSSE, syncCompletedAttempt, t]);
+
   const ensureGoalSession = useCallback(async (title: string): Promise<string> => {
     let sid = act().sessionId;
     if (sid) return sid;
@@ -1512,11 +1538,13 @@ export function Agent() {
       return;
     }
     promptSubmissionLockRef.current = true;
+    let sendingSessionId = act().sessionId;
     clearStreamingView();
 
     if (goalComposerActive) {
       try {
         const sid = await ensureGoalSession(prompt);
+        sendingSessionId = sid;
         const snapshot = await api.createGoal(sid, { objective: prompt });
         goalOpenRequestRef.current += 1;
         setGoalSnapshot(snapshot);
@@ -1540,6 +1568,7 @@ export function Agent() {
         }
         void syncCompletedAttempt(sid, sent.attempt_id);
       } catch (error) {
+        if (await recoverBusySession(error, prompt, sendingSessionId)) return;
         promptSubmissionLockRef.current = false;
         if (act().activity) archiveActivity("failed");
         act().setStatus("idle");
@@ -1585,12 +1614,14 @@ export function Agent() {
         setSearchParams({ session: sid }, { replace: true });
       }
       setupSSE(sid);
+      sendingSessionId = sid;
       const sent = await api.sendMessage(sid, finalPrompt);
       if (act().activity?.attemptId.startsWith("pending-")) {
         act().setActivityAttemptId(sent.attempt_id);
       }
       void syncCompletedAttempt(sid, sent.attempt_id);
     } catch (error) {
+      if (await recoverBusySession(error, finalPrompt, sendingSessionId)) return;
       promptSubmissionLockRef.current = false;
       archiveActivity("failed");
       act().setStatus("error");
@@ -1605,6 +1636,7 @@ export function Agent() {
     ensureGoalSession,
     forceScrollToBottom,
     goalComposerActive,
+    recoverBusySession,
     setSearchParams,
     setupSSE,
     status,
@@ -1682,13 +1714,14 @@ export function Agent() {
       }
       void syncCompletedAttempt(sessionId, sent.attempt_id);
     } catch (error) {
+      if (await recoverBusySession(error, prompt, sessionId)) return;
       archiveActivity("failed");
       act().setStatus("error");
       const message = isAuthRequiredError(error) ? AUTH_REQUIRED_MESSAGE : t('agent.failedToContinue');
       toast.error(message);
       act().addMessage({ id: "", type: "error", content: message, timestamp: Date.now() });
     }
-  }, [archiveActivity, forceScrollToBottom, goalSnapshot, sessionId, setupSSE, status, syncCompletedAttempt, t]);
+  }, [archiveActivity, forceScrollToBottom, goalSnapshot, recoverBusySession, sessionId, setupSSE, status, syncCompletedAttempt, t]);
 
   const handleRetry = useCallback((errorMsg: AgentMessage) => {
     if (status === "streaming") return;

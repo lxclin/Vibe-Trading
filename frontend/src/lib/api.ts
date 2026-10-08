@@ -22,12 +22,14 @@ export async function downloadGeneratedReport(reportId: string, filename: string
 export class ApiError extends Error {
   status: number;
   code?: string;
+  attemptId?: string;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, attemptId?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.attemptId = attemptId;
   }
 }
 
@@ -46,6 +48,12 @@ i18n.on("languageChanged", () => {
 
 export function isAuthRequiredError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
+export function isSessionBusyError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 409 && (
+    error.code === "session_busy" || error.message.includes("already has a run in progress")
+  );
 }
 
 export interface CorrelationResponse {
@@ -309,6 +317,7 @@ export interface PortfolioSettingsResponse {
 async function errorFromResponse(res: Response): Promise<ApiError> {
   let detail = `HTTP ${res.status}`;
   let code: string | undefined;
+  let attemptId: string | undefined;
   try {
     const body = await res.json();
     // Options endpoints report errors under an `error` key
@@ -317,8 +326,9 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
     if (typeof raw === "string" && raw) {
       detail = raw;
     } else if (raw && typeof raw === "object") {
-      const structured = raw as { code?: unknown; message?: unknown; max_length?: unknown };
+      const structured = raw as { code?: unknown; message?: unknown; max_length?: unknown; attempt_id?: unknown };
       if (typeof structured.code === "string" && structured.code) code = structured.code;
+      if (typeof structured.attempt_id === "string" && structured.attempt_id) attemptId = structured.attempt_id;
       if (typeof structured.message === "string" && structured.message) detail = structured.message;
       else if (code) detail = code;
       if (code === "message_too_long" && typeof structured.max_length === "number") {
@@ -329,7 +339,7 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
   if (res.status === 401 || res.status === 403) {
     detail = getAuthRequiredMessage();
   }
-  return new ApiError(detail, res.status, code);
+  return new ApiError(detail, res.status, code, attemptId);
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

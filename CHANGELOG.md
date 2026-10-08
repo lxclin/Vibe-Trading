@@ -59,6 +59,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Busy chat recovery after a waiting timeout.** A second send now restores
+  the original attempt's progress or completed reply, retains the unsent draft,
+  and explains that the backend is still running instead of reporting a generic
+  send failure. Timeout messages no longer claim execution was cancelled.
+
 - **Channel settings and delivery** (#1681, #1508). Unchanged nullable form
   values no longer block saving or testing. Email authentication requires a
   configured receiving authserv-id and sender-domain alignment; comments and
