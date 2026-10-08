@@ -32,6 +32,21 @@ logger = logging.getLogger(__name__)
 _GBP_PENCE_CURRENCY = "GBp"
 _PRICE_COLUMNS = ("open", "high", "low", "close")
 _UK_EQUITY_PATTERN = re.compile(r"^[A-Z0-9&.\-]+\.L$", re.I)
+# Venues that list lines in a second currency, whose market is one static
+# pool in the first. BYMA quotes GGAL.BA in ARS and GGALD.BA in USD (the
+# trailing D is not a rule: YPFD.BA is a peso line); the TSX quotes DLR.TO in
+# CAD and DLR-U.TO in USD. Yahoo declares each, and every priced source in
+# these markets' chains is Yahoo or yfinance, so the declared currency decides.
+_SINGLE_CURRENCY_VENUES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^[A-Z0-9&.\-]+\.BA$", re.I), "ARS"),
+    (re.compile(r"^[A-Z0-9&.\-]+\.(?:TO|V)$", re.I), "CAD"),
+)
+
+
+def _venue_currency(code: str) -> str | None:
+    """Return the one currency a symbol's venue pool accepts, or None if unconstrained."""
+    code = str(code).strip()
+    return next((cur for pattern, cur in _SINGLE_CURRENCY_VENUES if pattern.match(code)), None)
 
 
 def is_lse_symbol(code: str) -> bool:
@@ -65,6 +80,48 @@ def scale_pence_to_currency(
     for column in _PRICE_COLUMNS:
         scaled[column] = scaled[column] / 100.0
     return scaled, "GBp→GBP (÷100)"
+
+
+def declared_currency_required(code: str) -> bool:
+    """Return whether ``code``'s suffix names a venue that quotes in several currencies.
+
+    A loader must read the source's declared currency for such a symbol and
+    pass it to :func:`normalize_declared_quote_currency` before emitting bars.
+    """
+    return is_lse_symbol(code) or _venue_currency(code) is not None
+
+
+def normalize_declared_quote_currency(
+    frame: pd.DataFrame, code: str, currency: str | None
+) -> pd.DataFrame:
+    """Hold a frame to its market's currency contract and record the declared quote.
+
+    Args:
+        frame: Normalized OHLCV frame.
+        code: The project symbol the frame belongs to.
+        currency: Quote currency declared by the source, if any.
+
+    Returns:
+        The frame with ``attrs["quote_currency"]`` set whenever a currency was
+        declared (GBP for an LSE line after pence scaling).
+
+    Raises:
+        ValueError: If an LSE line is not declared GBP/GBp, or a BYMA / TSX
+            line is not declared in its market's currency -- each would enter a
+            single-currency pool in the wrong unit.
+    """
+    if is_lse_symbol(code):
+        return normalize_lse_quote_currency(frame, currency)
+    declared = currency.strip() if isinstance(currency, str) else ""
+    required = _venue_currency(code)
+    if required is not None and declared != required:
+        raise ValueError(
+            f"{code} must be quoted in {required} to enter that market's pool; "
+            f"the source declared {declared or 'no currency'!r}"
+        )
+    if declared:
+        frame.attrs["quote_currency"] = declared
+    return frame
 
 
 def normalize_lse_quote_currency(
@@ -409,8 +466,10 @@ _LOADER_CACHE_TRUE_VALUES = {"1", "true", "yes", "on"}
 # persisted. v5 USD/unknown .L entries must never be served as static GBP.
 # v7: tencent fqkline paginates backward (#1410) — entries cached under the
 # forward walk hold tail-truncated multi-year series and must never be served.
-_LOADER_CACHE_VERSION = 7
-_LOADER_FRAME_METADATA_ATTRS = ("quote_currency", "currency_conversion")
+# v8: FMP/Tiingo keep one adjusted/raw basis and cached frames retain their
+# actual adjustment stamp. Older entries may contain artificial return jumps.
+_LOADER_CACHE_VERSION = 8
+_LOADER_FRAME_METADATA_ATTRS = ("quote_currency", "currency_conversion", "adjustment")
 
 
 def loader_cache_enabled() -> bool:

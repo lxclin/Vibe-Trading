@@ -1,8 +1,10 @@
 import { Cpu, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { LLMSettings } from "@/lib/api";
+import { normalizeReasoningEffort, reasoningEffortsForModel, type ReasoningEffort } from "@/lib/modelOptions";
 
 type OpenAICodexModel =
+  | "openai-codex/gpt-6.1-sol"
   | "openai-codex/gpt-5.6-sol"
   | "openai-codex/gpt-5.6-luna"
   | "openai-codex/gpt-6-sol"
@@ -17,7 +19,7 @@ interface Props {
   switchDisabled?: boolean;
   onProviderSwitch?: (provider: "deepseek" | "openai-codex") => void;
   onChatGptModelChange?: (model: OpenAICodexModel) => void;
-  onReasoningEffortChange?: (effort: "" | "none" | "low" | "medium" | "high" | "max") => void;
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
 }
 
 export function ModelRuntimeBar({
@@ -43,15 +45,17 @@ export function ModelRuntimeBar({
     low: t("settings.reasoningEffortLow"),
     medium: t("settings.reasoningEffortMedium"),
     high: t("settings.reasoningEffortHigh"),
+    xhigh: t("settings.reasoningEffortXhigh"),
     max: t("settings.reasoningEffortMax"),
   };
   const reasoningEffort = runtimeReasoningEffort !== undefined
     ? runtimeReasoningEffort
-    : settings.reasoning_effort;
+    : normalizeReasoningEffort(model, settings.reasoning_effort);
   const effortLabel = effortLabels[reasoningEffort] || t("settings.providerDefault");
   const configuredProvider = settings.provider === "openai-codex" ? "openai-codex" : "deepseek";
   const knownChatGptModel = (
     [
+      "openai-codex/gpt-6.1-sol",
       "openai-codex/gpt-5.6-sol",
       "openai-codex/gpt-5.6-luna",
       "openai-codex/gpt-6-sol",
@@ -59,8 +63,10 @@ export function ModelRuntimeBar({
     ] as const
   ).includes(settings.model_name as OpenAICodexModel);
   const chatGptModel = settings.model_name;
-  const selectableEffort = ["", "none", "low", "medium", "high", "max"].includes(settings.reasoning_effort)
-    ? settings.reasoning_effort
+  const allowedEfforts = reasoningEffortsForModel(chatGptModel);
+  const normalizedEffort = normalizeReasoningEffort(chatGptModel, settings.reasoning_effort);
+  const selectableEffort = allowedEfforts.includes(normalizedEffort as ReasoningEffort)
+    ? normalizedEffort
     : "";
   const canSwitch = Boolean(
     onProviderSwitch
@@ -122,6 +128,7 @@ export function ModelRuntimeBar({
             className="h-6 shrink-0 rounded-md border border-border/70 bg-background px-1.5 text-[10px] text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             {!knownChatGptModel && <option value={chatGptModel}>{chatGptModel}</option>}
+            <option value="openai-codex/gpt-6.1-sol">6.1 Sol</option>
             <option value="openai-codex/gpt-5.6-sol">5.6 Sol</option>
             <option value="openai-codex/gpt-5.6-luna">5.6 Luna</option>
             <option value="openai-codex/gpt-6-sol">6 Sol</option>
@@ -135,16 +142,15 @@ export function ModelRuntimeBar({
             value={selectableEffort}
             disabled={switchDisabled || switching}
             onChange={(event) => onReasoningEffortChange(
-              event.target.value as "" | "none" | "low" | "medium" | "high" | "max",
+              event.target.value as ReasoningEffort,
             )}
             className="h-6 shrink-0 rounded-md border border-border/70 bg-background px-1.5 text-[10px] text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <option value="">{t("settings.providerDefault")}</option>
-            <option value="none">{effortLabels.none}</option>
-            <option value="low">{effortLabels.low}</option>
-            <option value="medium">{effortLabels.medium}</option>
-            <option value="high">{effortLabels.high}</option>
-            <option value="max">{effortLabels.max}</option>
+            {allowedEfforts.map((effort) => (
+              <option key={effort} value={effort}>
+                {effort ? effortLabels[effort] : t("settings.providerDefault")}
+              </option>
+            ))}
           </select>
         )}
         <span className={[

@@ -29,7 +29,7 @@ from src.providers.openai_codex import (
 )
 
 
-DEFAULT_CODEX_MODEL = "openai-codex/gpt-5.6-sol"
+DEFAULT_CODEX_MODEL = "openai-codex/gpt-6.1-sol"
 
 
 def _jwt(payload: dict[str, object]) -> str:
@@ -92,8 +92,8 @@ def test_codex_body_strips_provider_prefix_and_converts_tools() -> None:
         stream=True,
     )
 
-    assert _strip_model_prefix(DEFAULT_CODEX_MODEL) == "gpt-5.6-sol"
-    assert body["model"] == "gpt-5.6-sol"
+    assert _strip_model_prefix(DEFAULT_CODEX_MODEL) == "gpt-6.1-sol"
+    assert body["model"] == "gpt-6.1-sol"
     assert body["instructions"] == "You are careful."
     assert body["tools"][0]["name"] == "bash"
     assert body["input"][0]["content"][0]["text"] == "Say hi."
@@ -562,3 +562,20 @@ def test_codex_500_is_retryable_via_codex_stream_error() -> None:
     )
     assert err.status_code == 500
     assert err.retryable is True
+
+
+@pytest.mark.parametrize("effort,expected", [("none", "medium"), ("minimal", "medium"), ("xhigh", "xhigh"), ("max", "max")])
+def test_sol_61_tool_request_migrates_legacy_reasoning(effort, expected) -> None:
+    adapter = OpenAICodexLLM(model="openai-codex/gpt-6.1-sol", reasoning_effort=effort)
+    tool = {"type": "function", "function": {"name": "get_quote", "parameters": {"type": "object", "properties": {}}}}
+    body = adapter.bind_tools([tool])._body([{"role": "user", "content": "Fetch a quote."}], stream=True)
+    assert body["model"] == "gpt-6.1-sol"
+    assert body["reasoning"]["effort"] == expected
+    assert body["tools"][0]["name"] == "get_quote"
+
+
+def test_sol_61_effort_migration_preserves_other_models() -> None:
+    from src.providers.model_options import normalize_reasoning_effort
+
+    assert normalize_reasoning_effort("openai-codex/gpt-6-luna", "none") == "none"
+    assert normalize_reasoning_effort("gpt-6.1-sol", "") == ""

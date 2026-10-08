@@ -1,3 +1,4 @@
+import { normalizeReasoningEffort, reasoningEffortsForModel, reasoningEffortTranslationKeys } from "@/lib/modelOptions";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Database, KeyRound, Loader2, RefreshCw, RotateCcw, Save, Server, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -534,16 +535,15 @@ export function Settings() {
             <label className="grid gap-2">
               <span className={labelClass}>{t("settings.reasoningEffort")}</span>
               <select
-                value={form.reasoning_effort}
+                value={normalizeReasoningEffort(form.model_name, form.reasoning_effort)}
                 onChange={(event) => setForm({ ...form, reasoning_effort: event.target.value })}
                 className={fieldClass}
               >
-                <option value="">{t("settings.providerDefault")}</option>
-                <option value="none">{t("settings.reasoningEffortNone")}</option>
-                <option value="low">{t("settings.reasoningEffortLow")}</option>
-                <option value="medium">{t("settings.reasoningEffortMedium")}</option>
-                <option value="high">{t("settings.reasoningEffortHigh")}</option>
-                <option value="max">{t("settings.reasoningEffortMax")}</option>
+                {reasoningEffortsForModel(form.model_name).map((effort) => (
+                  <option key={effort} value={effort}>
+                    {t(reasoningEffortTranslationKeys[effort])}
+                  </option>
+                ))}
               </select>
               <span className={hintClass}>{t("settings.reasoningEffortDesc")}</span>
             </label>

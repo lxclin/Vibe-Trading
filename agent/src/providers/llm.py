@@ -287,6 +287,7 @@ if ChatOpenAI is not None:
         _vibe_provider: Optional[str] = PrivateAttr(default=None)
         _vibe_api_key: str = PrivateAttr(default="")
         _vibe_ambient_header_names: tuple[str, ...] = PrivateAttr(default=())
+        _vibe_explicit_twin_headers: dict[str, Any] = PrivateAttr(default_factory=dict)
         _vibe_has_explicit_authorization: bool = PrivateAttr(default=False)
         _vibe_owned_http_clients: tuple[Any, ...] = PrivateAttr(default=())
         _vibe_fallback_session_id: str = PrivateAttr(default="")
@@ -318,9 +319,24 @@ if ChatOpenAI is not None:
             # scheduled research, CLI) every request from this adapter still
             # shares a stable conversation identity.
             self._vibe_fallback_session_id = uuid.uuid4().hex
+            # Every ambient spelling is omitted per request, and an explicit
+            # header sharing its name in another case is put back after the
+            # omits (see _provider_scoped_extra_headers). Excluding the twin
+            # from the omits instead is right only under openai >= 3.19.2's
+            # case-insensitive merge; openai 2.53 (the lock) and 3.19.0 merge
+            # with a plain dict and would send the ambient ``user-agent``
+            # beside ``User-Agent`` (#1573).
             self._vibe_ambient_header_names = tuple(
                 name for name in ambient_names if name not in explicit_names
             )
+            ambient_names_lower = {name.lower() for name in self._vibe_ambient_header_names}
+            self._vibe_explicit_twin_headers = {
+                str(name): value
+                for name, value in (
+                    explicit_headers.items() if isinstance(explicit_headers, Mapping) else ()
+                )
+                if str(name).lower() in ambient_names_lower
+            }
             self._vibe_has_explicit_authorization = (
                 "authorization" in explicit_names_lower
             )
@@ -356,6 +372,10 @@ if ChatOpenAI is not None:
                 ambient_authorization = (
                     ambient_authorization or name.lower() == "authorization"
                 )
+            # openai >= 3.19.2 applies an omit case-insensitively, so the omit for an
+            # ambient ``user-agent`` also took the provider's ``User-Agent``.
+            # Inserted after the omits, the explicit value is the one that stays.
+            overrides.update(self._vibe_explicit_twin_headers)
 
             # OPENAI_CUSTOM_HEADERS can override the SDK's normal Bearer header.
             # Remove every captured spelling, then restore the selected provider
@@ -1690,6 +1710,13 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
     # Moonshot/DeepSeek official APIs emit reasoning by default and ignore this field.
     configured_responses_api = get_env_config().llm.langchain_use_responses_api
     use_responses_api = uses_responses_api(provider, configured_responses_api)
+    from src.providers.model_options import is_gpt_61_sol, normalize_reasoning_effort
+
+    if provider == "openai" and _openai_label_points_at_openai(caps) and is_gpt_61_sol(name):
+        # Sol 6.1 function tools require Responses even when an older settings
+        # file selected Chat Completions or disabled reasoning.
+        use_responses_api = True
+        effort = normalize_reasoning_effort(name, effort)
     creds = get_llm_credentials(provider, name)
     api_key = creds["api_key"]
     _validate_authorization_credential(

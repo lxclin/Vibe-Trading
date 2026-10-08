@@ -134,6 +134,10 @@ def decision_coverage(
 
 def is_single_buy_question(question: str) -> bool:
     """Select a direct one-instrument entry question, excluding meta prompts."""
+    # Bare mainland fund codes need the ETF workflow too, even when the user
+    # omits the word ETF. A fund has no issuer operating cash-flow statement.
+    if re.search(r"(?<!\d)(?:5\d{5}|1[568]\d{4})(?:\.(?:SH|SZ))?(?!\d)", question, re.IGNORECASE):
+        return False
     return bool(_BUY_QUESTION_RE.search(question)) and not bool(
         _META_OR_COMPARISON_RE.search(question)
     )

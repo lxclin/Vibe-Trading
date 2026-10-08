@@ -32,7 +32,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from src.api import state as _state
 from src.channels import config as _channels_config
 from src.channels.bus.queue import MessageBus
-from src.channels.config_meta import SECRET_KEY_RE, channel_field_hints, split_values_secrets
+from src.channels.config_meta import (
+    channel_field_hints,
+    is_secret_key,
+    split_values_secrets,
+)
 from src.channels.registry import (
     discover_channel_names,
     inspect_channel,
@@ -40,7 +44,7 @@ from src.channels.registry import (
     load_channel_class,
 )
 from src.config import writer as _config_writer
-from src.config.paths import get_config_path
+from src.config.paths import get_config_path, get_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +118,7 @@ def _known_channel_names() -> set[str]:
 
 def _is_secret_key(name: str, key: str) -> bool:
     """Return whether a config key must never cross the wire in clear."""
-    if SECRET_KEY_RE.search(key):
-        return True
-    return any(hint["key"] == key and hint["secret"] for hint in channel_field_hints(name))
+    return is_secret_key(name, key)
 
 
 def _stored_section(name: str) -> dict[str, Any]:
@@ -162,6 +164,26 @@ def _patch_of(name: str, body: dict[str, Any]) -> dict[str, Any]:
         if not (_is_secret_key(name, key) and isinstance(value, str) and not value.strip())
     }
 
+
+def _normalize_nullable_blanks(name: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Map blank form values back to None for nullable config defaults.
+
+    The generic web form renders text-like None values as an empty string.
+    Without this normalization, echoing a pristine form back to the API can
+    make nullable Literal fields invalid (for example Email post_action).
+    """
+    try:
+        defaults = load_channel_class(name).default_config()
+    except Exception:  # noqa: BLE001 - validation reports unloadable adapters later
+        return patch
+    if not isinstance(defaults, dict):
+        return patch
+    return {
+        key: None
+        if isinstance(value, str) and value == "" and defaults.get(key) is None
+        else value
+        for key, value in patch.items()
+    }
 
 def _clear_flags(extra: dict[str, Any] | None) -> list[str]:
     """Return the ``clear_<field>`` targets from a request's extra keys."""
@@ -257,6 +279,23 @@ def _reject_validation(fields: list[str]) -> HTTPException:
     )
 
 
+def _ephemeral_kwargs(name: str) -> dict[str, Any]:
+    """Return adapter-specific constructor kwargs for ephemeral instances.
+
+    Mirrors ``ChannelManager._build_channel_kwargs``: ``WebSocketChannel``
+    requires a keyword-only ``gateway``. The ephemeral instance is throwaway
+    (validation + probe only, it never serves), so a bare
+    ``build_gateway_services`` bundle — all in-memory dataclasses, no
+    filesystem or network side effects — is sufficient and
+    ``session_manager`` / ``cron_service`` may stay ``None``.
+    """
+    if name == "websocket":
+        from src.channelsui.gateway_services import build_gateway_services
+
+        return {"gateway": build_gateway_services(workspace_path=get_workspace_path())}
+    return {}
+
+
 def _build_ephemeral(name: str, section: dict[str, Any]) -> tuple[type, Any]:
     """Construct a throwaway adapter instance to validate *section*.
 
@@ -269,7 +308,7 @@ def _build_ephemeral(name: str, section: dict[str, Any]) -> tuple[type, Any]:
     except Exception as exc:  # noqa: BLE001 - an unloadable adapter cannot validate
         raise _reject_validation([type(exc).__name__]) from None
     try:
-        return cls, cls(section, MessageBus())
+        return cls, cls(section, MessageBus(), **_ephemeral_kwargs(name))
     except ValidationError as exc:
         raise _reject_validation(_validation_fields(exc)) from None
     except Exception as exc:  # noqa: BLE001 - any construction error is a config error
@@ -317,7 +356,7 @@ async def _hot_apply(name: str, section: dict[str, Any] | None) -> str:
 async def _apply_update(name: str, payload: ChannelConfigUpdateRequest) -> dict[str, Any]:
     """Validate → optional enable-transition probe → write → hot apply."""
     stored = _stored_section(name)
-    patch = _patch_of(name, payload.config)
+    patch = _normalize_nullable_blanks(name, _patch_of(name, payload.config))
     clears = _clear_flags(payload.model_extra)
     merged = {**stored, **patch}
     for key in clears:
@@ -367,7 +406,7 @@ async def _apply_update(name: str, payload: ChannelConfigUpdateRequest) -> dict[
 async def _run_test(name: str, body: dict[str, Any] | None, clears: list[str]) -> dict[str, Any]:
     """Probe credentials on an ephemeral instance; never persists anything."""
     stored = _stored_section(name)
-    patch = _patch_of(name, body or {})
+    patch = _normalize_nullable_blanks(name, _patch_of(name, body or {}))
     merged = {**stored, **patch}
     for key in clears:
         merged.pop(key, None)
@@ -396,7 +435,7 @@ async def _run_test(name: str, body: dict[str, Any] | None, clears: list[str]) -
         raise _reject_validation(unknown)
 
     try:
-        instance = cls(merged, MessageBus())
+        instance = cls(merged, MessageBus(), **_ephemeral_kwargs(name))
     except ValidationError as exc:
         detail = "validation_error: " + ", ".join(_validation_fields(exc))
         return _result(False, "invalid_credentials", detail, sdk_fallback)

@@ -197,6 +197,170 @@ def test_ok_false_tool_envelope_is_failure() -> None:
     assert _is_tool_success('{"ok": true, "data": {}}') is True
 
 
+def test_re_resolving_same_query_cannot_overwrite_a_locked_symbol(
+    tmp_path: Path,
+) -> None:
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Analyze Acme")
+    first = {
+        "ok": True,
+        "data": {
+            "query": "Acme",
+            "candidates": [{"symbol": "AAA.US", "name": "Acme", "market": "us", "source": "yahoo"}],
+        },
+    }
+    second = {
+        "ok": True,
+        "data": {
+            "query": "Acme",
+            "candidates": [{"symbol": "BBB.US", "name": "Acme", "market": "us", "source": "yahoo"}],
+        },
+    }
+
+    ledger.ingest_tool_result(
+        tool_name="search_symbol", arguments={"query": "Acme"},
+        result=json.dumps(first), call_id="resolve-a", success=True,
+    )
+    assert ledger.authorized_symbols == {"AAA.US"}
+    ledger.authorize_tool_call(
+        "search_symbol", {"query": "Acme"},
+        batch_authorized_symbols=ledger.authorized_symbols, call_id="resolve-b",
+    )
+    ledger.ingest_tool_result(
+        tool_name="search_symbol", arguments={"query": "Acme"},
+        result=json.dumps(second), call_id="resolve-b", success=True,
+    )
+
+    assert ledger.identity_status == "conflicting"
+    assert ledger.authorized_symbols == set()
+
+
+def _resolve_candidate(
+    ledger: GroundingLedger, symbol: str, query: str, call_id: str
+) -> None:
+    """Drive one ``search_symbol`` resolution for ``query`` through the ledger."""
+    ledger.authorize_tool_call(
+        "search_symbol",
+        {"query": query},
+        batch_authorized_symbols=ledger.authorized_symbols,
+        call_id=call_id,
+    )
+    ledger.ingest_tool_result(
+        tool_name="search_symbol",
+        arguments={"query": query},
+        result=json.dumps(
+            {
+                "ok": True,
+                "data": {
+                    "query": query,
+                    "candidates": [
+                        {
+                            "symbol": symbol,
+                            "name": query,
+                            "market": "us",
+                            "source": "yahoo",
+                        }
+                    ],
+                },
+            }
+        ),
+        call_id=call_id,
+        success=True,
+    )
+
+
+def test_a_repeat_resolution_cannot_clear_a_conflict(tmp_path: Path) -> None:
+    """Re-answering one side of a contradiction is not evidence that settles it."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Analyze Acme")
+    _resolve_candidate(ledger, "AAA.US", "Acme", "resolve-a")
+    _resolve_candidate(ledger, "BBB.US", "Acme", "resolve-b")
+    assert ledger.identity_status == "conflicting"
+
+    _resolve_candidate(ledger, "BBB.US", "Acme", "resolve-c")
+
+    assert ledger.identity_status == "conflicting"
+    assert ledger.authorized_symbols == set()
+
+
+def test_a_non_conclusive_step_cannot_clear_a_conflict(tmp_path: Path) -> None:
+    """A timeout after a contradiction leaves the contradiction standing."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Analyze Acme")
+    _resolve_candidate(ledger, "AAA.US", "Acme", "resolve-a")
+    _resolve_candidate(ledger, "BBB.US", "Acme", "resolve-b")
+    assert ledger.identity_status == "conflicting"
+    ledger.authorize_tool_call(
+        "search_symbol",
+        {"query": "Acme"},
+        batch_authorized_symbols=ledger.authorized_symbols,
+        call_id="resolve-timeout",
+    )
+    ledger.ingest_tool_result(
+        tool_name="search_symbol",
+        arguments={"query": "Acme"},
+        result=json.dumps({"ok": False, "error": "timeout"}),
+        call_id="resolve-timeout",
+        success=False,
+    )
+
+    assert ledger.identity_status == "conflicting"
+
+
+@pytest.mark.parametrize(
+    ("payload", "success", "call_id"),
+    [
+        ({"ok": False, "error": "timeout"}, False, "resolve-flaky"),
+        ({"ok": False, "error": "rate limited"}, True, "resolve-refused"),
+        (
+            {
+                "ok": True,
+                "source": "symbol_search",
+                "data": {"query": "Acme", "count": 0, "candidates": []},
+            },
+            True,
+            "resolve-empty",
+        ),
+    ],
+)
+def test_a_non_conclusive_re_resolution_cannot_retract_a_locked_symbol(
+    tmp_path: Path, payload: dict[str, Any], success: bool, call_id: str
+) -> None:
+    """A timeout, a refusal or an empty list is not evidence against the lock."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Analyze Acme")
+    resolved = {
+        "ok": True,
+        "data": {
+            "query": "Acme",
+            "candidates": [
+                {"symbol": "AAA.US", "name": "Acme", "market": "us", "source": "yahoo"}
+            ],
+        },
+    }
+    ledger.ingest_tool_result(
+        tool_name="search_symbol",
+        arguments={"query": "Acme"},
+        result=json.dumps(resolved),
+        call_id="resolve-locked",
+        success=True,
+    )
+    assert ledger.authorized_symbols == {"AAA.US"}
+
+    ledger.authorize_tool_call(
+        "search_symbol",
+        {"query": "Acme"},
+        batch_authorized_symbols=ledger.authorized_symbols,
+        call_id=call_id,
+    )
+    ledger.ingest_tool_result(
+        tool_name="search_symbol",
+        arguments={"query": "Acme"},
+        result=json.dumps(payload),
+        call_id=call_id,
+        success=success,
+    )
+
+    assert ledger.identity_status == "locked"
+    assert ledger.authorized_symbols == {"AAA.US"}
+
+
 def test_resolver_and_consumer_in_same_batch_cannot_race(
     tmp_path: Path,
 ) -> None:
@@ -328,6 +492,19 @@ def test_market_sensitive_skill_waits_for_prior_identity_batch(
     trace.close()
 
     assert skill.calls == 1
+
+
+def test_argentina_symbols_have_grounding_identity() -> None:
+    """Buenos Aires symbols retain venue and ARS identity."""
+    assert _scan_symbols("Check GOOGL.BA price") == {"GOOGL.BA"}
+    assert _infer_venue("GGAL.BA") == "buenos_aires"
+    assert _infer_currency("GGAL.BA") == "ARS"
+
+
+def test_argentina_symbol_is_seeded_with_market_identity(tmp_path: Path) -> None:
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Check GOOGL.BA price")
+
+    assert ledger.authorized_symbols == {"GOOGL.BA"}
 
 
 @pytest.mark.parametrize(
@@ -1898,6 +2075,8 @@ def test_weekday_suffixed_claim_dates_match_evidence() -> None:
     assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "08-10") is True
     assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "2026-08-10") is True
     assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "2026-08-10(一)") is True
+    assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "2025-08-10") is False
+    assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "2025-08-10(一)") is False
     assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "08-11") is False
     assert _timestamp_matches_claim_date("2026-08-10T00:00:00", "no-date") is False
 
@@ -3701,6 +3880,10 @@ def test_every_resolver_skip_marker_is_understood_as_a_non_failure(
     monkeypatch.setattr(resolver.eastmoney_client, "get_json", lambda *a, **k: {})
     monkeypatch.setattr(resolver.yahoo_client, "search", lambda *a, **k: [])
 
+    monkeypatch.setattr(
+        resolver, "_search_official_a_shares", lambda query: ([], {"sse": "ok", "szse": "ok"})
+    )
+
     result = resolver.SymbolSearchTool().execute(query=query)
     statuses = json.loads(result)["data"]["sources"]
     assert any(value.startswith("skipped:") for value in statuses.values()), statuses
@@ -4743,3 +4926,50 @@ def test_crypto_pair_tables_match_the_resolver() -> None:
     # gold and forex are quoted in it too); grounding decides it by the base
     # whitelist instead, so it is the only permitted difference.
     assert set(g._CRYPTO_QUOTE_ASSETS) | {"USD"} == set(ss._CRYPTO_QUOTE_ASSETS)
+
+
+def _declared_currency_ledger(tmp_path: Path, symbol: str, quote_currency: str | None):
+    """One two-bar quote for ``symbol``; provenance declares ``quote_currency`` if given."""
+    payload = json.loads(_market_payload(symbol))
+    if quote_currency is not None:
+        payload["_provenance"][symbol]["quote_currency"] = quote_currency
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=f"{symbol} last close?")
+    ledger.ingest_tool_result(
+        tool_name="get_market_data",
+        arguments={"codes": [symbol]},
+        result=json.dumps(payload),
+        call_id="prices",
+        success=True,
+    )
+    return ledger
+
+
+def test_the_declared_quote_currency_is_the_one_an_answer_must_name(tmp_path: Path) -> None:
+    """A venue can list one issuer in two currencies (GGAL.BA ARS, GGALD.BA USD, #1566)."""
+    ledger = _declared_currency_ledger(tmp_path, "GGAL.BA", "USD")
+
+    assert ledger.validate_final_answer(
+        "GGAL.BA closed at 1.171 USD on 2026-06-24 (source: Yahoo)."
+    ).valid
+    wrong = ledger.validate_final_answer(
+        "GGAL.BA closed at 1.171 ARS on 2026-06-24 (source: Yahoo)."
+    )
+    assert "currency_not_surfaced" in {issue["code"] for issue in wrong.issues}
+
+
+@pytest.mark.parametrize(
+    ("symbol", "answer"),
+    [
+        ("VOD.L", "VOD.L closed at £1.171 on 2026-06-24 (source: Yahoo)."),
+        ("VIC.VN", "VIC.VN closed at 1.171₫ on 2026-06-24 (source: Yahoo)."),
+        ("GGAL.BA", "GGAL.BA closed at AR$1.171 on 2026-06-24 (source: Yahoo)."),
+        ("GGAL.BA", "GGAL.BA 2026-06-24 收盘 1.171 阿根廷比索，数据来源：雅虎。"),
+    ],
+)
+def test_a_currency_written_the_usual_way_counts_as_named(
+    tmp_path: Path, symbol: str, answer: str
+) -> None:
+    """.L / .VN / .BA gained a currency, so its sign must satisfy the gate like $ or ¥ do."""
+    result = _declared_currency_ledger(tmp_path, symbol, None).validate_final_answer(answer)
+
+    assert result.valid is True, result.issues

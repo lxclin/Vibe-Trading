@@ -1,6 +1,6 @@
 {
   "app": {
-    "version": "v0.1.15"
+    "version": "v0.1.16"
   },
   "charts": {
     "noPriceData": "Aún no hay datos de precio para este símbolo",
@@ -148,6 +148,9 @@
     "advancedHint": "Una expresión cron de 5 campos evaluada en la zona horaria seleccionada (minuto hora día mes día_de_semana; se permiten listas y rangos), o un intervalo simple en milisegundos.",
     "timezoneLabel": "Zona horaria",
     "create": "Programar ejecución",
+    "saveChanges": "Guardar cambios",
+    "cancelEdit": "Cancelar edición",
+    "editingHint": "Estás editando esta ejecución programada. Al guardar se conservan su identidad y su historial de ejecución.",
     "promptRequired": "Ingresa un prompt de investigación antes de programar.",
     "invalidTime": "Ingresa una hora válida en formato HH:MM.",
     "executorHint": "Las ejecuciones solo funcionan cuando el servidor se inicia con VIBE_TRADING_ENABLE_SCHEDULER habilitado.",
@@ -182,16 +185,37 @@
     "proposalConfirmCancel": "Confirmar cancelación",
     "nextRun": "Próxima ejecución: {{when}}",
     "lastError": "Último error: {{error}}",
+    "edit": "Editar",
+    "editAria": "Editar ejecución programada: {{prompt}}",
+    "editRunningDisabled": "Espera a que termine la ejecución o su entrega antes de editar.",
     "delete": "Eliminar",
     "deleteAria": "Eliminar ejecución programada: {{prompt}}",
     "confirmDelete": "Confirmar eliminación",
     "confirmDeleteAria": "Confirmar eliminación de ejecución programada: {{prompt}}",
-    "deliveryChannelLabel": "Enviar al canal",
-    "deliveryChannelPlaceholder": "telegram, feishu… (vacío para que los resultados queden en la app)",
-    "deliveryTargetLabel": "Destino en el canal",
-    "deliveryTargetPlaceholder": "id de chat / grupo / usuario",
-    "deliveryHint": "Desactivado por defecto. El informe se envía **cuando la ejecución termina**, no cuando se programa.",
-    "deliveryTargetRequired": "Indica un destino para ese canal, o deja el canal vacío.",
+    "deliveryChannelLabel": "Canal de entrega",
+    "deliveryChannelPlaceholder": "Elige un canal configurado",
+    "deliveryInApp": "Solo en Vibe (no enviar)",
+    "deliveryNoChannels": "No hay canales de entrega habilitados configurados. Configura uno en Configuración → Canales.",
+    "deliveryChannelsLoadFailed": "No se pudieron cargar los canales de entrega configurados.",
+    "deliveryChannelUnavailable": "{{channel}} (no disponible actualmente)",
+    "deliveryTargetLabel": "Destino",
+    "deliveryTargetKind_destination": "Destino",
+    "deliveryTargetKind_email_address": "Dirección de email del destinatario",
+    "deliveryTargetKind_chat": "Chat",
+    "deliveryTargetKind_channel": "Canal",
+    "deliveryTargetPlaceholder": "chat, grupo, usuario, dirección o ID de canal",
+    "deliveryTargetDisabled": "Primero elige un canal de entrega.",
+    "deliveryHint": "El informe se envía cuando la ejecución termina, no cuando se programa.",
+    "deliveryTargetRequired": "Indica un destino para ese canal, o deja la entrega solo en Vibe.",
+    "deliverySummary": "{{channel}} → {{target}}",
+    "deliveryUnknownTarget": "Destino configurado",
+    "deliveryFormatLabel": "Formato del informe por email",
+    "deliveryFormatDefault": "Predeterminado del canal (texto plano)",
+    "deliveryFormatHtml": "Email HTML",
+    "deliveryFormatPdf": "PDF adjunto",
+    "deliveryFormatDefaultHint": "Mantiene el comportamiento de texto plano existente.",
+    "deliveryFormatHtmlHint": "Muestra el informe completo como HTML sanitizado en el cuerpo del email.",
+    "deliveryFormatPdfHint": "Adjunta el informe completo como PDF y deja solo un aviso breve en el cuerpo.",
     "delivery_none": "Se enviará a {{channel}} tras la próxima ejecución",
     "delivery_pending": "Informe pendiente de envío a {{channel}}",
     "delivery_sending": "Enviando el informe a {{channel}}",
@@ -202,7 +226,16 @@
     "verdictUnreadable": "No se pudo leer el último veredicto",
     "verdictNoCalls": "Sin señales",
     "verdictDelta": "{{was}} → {{now}}",
-    "verdictRecorded": "a fecha de {{when}}"
+    "verdictRecorded": "a fecha de {{when}}",
+    "deliveryKnownTargetLabel": "Destino conocido",
+    "deliveryKnownTargetPlaceholder": "Elegir un destino conocido…",
+    "deliverySuggestionKind_private_chat": "Mi chat privado",
+    "deliveryTargetPlaceholder_email_address": "name@example.com",
+    "deliveryTargetPlaceholder_chat": "ID de chat, grupo o usuario",
+    "deliveryTargetPlaceholder_channel": "ID del canal",
+    "deliveryTargetPlaceholder_destination": "chat, grupo, usuario, dirección o ID de canal",
+    "deliveryTargetPlaceholder_slack_destination": "#canal, @usuario o ID de conversación",
+    "deliveryTargetKind_slack_destination": "Destino"
   },
   "reports": {
     "badge": "Informes",
@@ -525,6 +558,256 @@
             "label": "Tamaño máximo de descarga (bytes)",
             "help": "Límite de seguridad para la descarga de un solo archivo adjunto (predeterminado 209715200 = 200 MB)."
           }
+        },
+        "email": {
+          "consent_granted": {
+            "label": "Consentimiento otorgado",
+            "help": "Interruptor de permiso principal. El canal solo lee y envía correo después de que otorgues el consentimiento explícitamente."
+          },
+          "imap_host": {
+            "label": "Host IMAP",
+            "help": "Servidor de correo entrante, p. ej. imap.gmail.com. El correo entrante se sondea desde este servidor."
+          },
+          "imap_port": {
+            "label": "Puerto IMAP",
+            "help": "Puerto entrante (predeterminado 993 con SSL)."
+          },
+          "imap_username": {
+            "label": "Usuario IMAP",
+            "help": "Cuenta del buzón para iniciar sesión por IMAP; normalmente es la dirección de correo completa."
+          },
+          "imap_password": {
+            "label": "Contraseña IMAP",
+            "help": "Contraseña del buzón o contraseña de aplicación para IMAP. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "imap_mailbox": {
+            "label": "Buzón IMAP",
+            "help": "Carpeta que se sondea en busca de correo nuevo (predeterminada INBOX)."
+          },
+          "imap_use_ssl": {
+            "label": "SSL de IMAP",
+            "help": "Conectar a IMAP mediante SSL (activado de forma predeterminada; necesario para el puerto 993)."
+          },
+          "imap_use_tls": {
+            "label": "STARTTLS de IMAP",
+            "help": "Si SSL de IMAP está desactivado, cifrar la conexión con STARTTLS antes de iniciar sesión (activado de forma predeterminada; lo habitual en el puerto 143). Desactívalo solo para un servidor sin TLS en una red de confianza: la contraseña se enviaría en texto plano."
+          },
+          "smtp_host": {
+            "label": "Host SMTP",
+            "help": "Servidor de correo saliente, p. ej. smtp.gmail.com. Las respuestas se envían a través de este servidor."
+          },
+          "smtp_port": {
+            "label": "Puerto SMTP",
+            "help": "Puerto saliente (predeterminado 587 con STARTTLS; 465 para SSL implícito)."
+          },
+          "smtp_username": {
+            "label": "Usuario SMTP",
+            "help": "Cuenta para autenticarse con el servidor SMTP; normalmente es la dirección de correo completa."
+          },
+          "smtp_password": {
+            "label": "Contraseña SMTP",
+            "help": "Contraseña o contraseña de aplicación para SMTP. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "smtp_use_tls": {
+            "label": "STARTTLS de SMTP",
+            "help": "Cifrar la conexión SMTP con STARTTLS (activado de forma predeterminada; lo habitual en el puerto 587). En la práctica es excluyente con SSL de SMTP."
+          },
+          "smtp_use_ssl": {
+            "label": "SSL de SMTP",
+            "help": "Conectar a SMTP mediante TLS implícito, p. ej. el puerto 465 (desactivado de forma predeterminada). En la práctica es excluyente con STARTTLS."
+          },
+          "verify_tls": {
+            "label": "Verificar el certificado TLS",
+            "help": "Verificar el certificado TLS y el nombre de host del servidor de correo (recomendado). Desactivar solo para servidores con certificados autofirmados o de CA interna."
+          },
+          "from_address": {
+            "label": "Dirección de remitente",
+            "help": "Dirección desde la que se envían las respuestas. Si se deja vacía, se usa el usuario SMTP."
+          },
+          "auto_reply_enabled": {
+            "label": "Respuestas automáticas",
+            "help": "Responder automáticamente al correo entrante. Los envíos iniciados por el agente no se ven afectados."
+          },
+          "poll_interval_seconds": {
+            "label": "Intervalo de sondeo (s)",
+            "help": "Con qué frecuencia se comprueba el buzón IMAP en busca de correo nuevo (predeterminado 30, mínimo 5)."
+          },
+          "mark_seen": {
+            "label": "Marcar como leído",
+            "help": "Marcar como leídos los correos procesados en el buzón."
+          },
+          "post_action": {
+            "label": "Acción posterior",
+            "help": "Qué hacer con los correos procesados: delete (eliminar), move (mover a otro buzón) o vacío para conservarlos."
+          },
+          "post_action_move_mailbox": {
+            "label": "Mover a buzón",
+            "help": "Buzón de destino usado cuando la acción posterior es move."
+          },
+          "post_action_expunge": {
+            "label": "Expurgar tras eliminar",
+            "help": "Eliminar definitivamente los correos borrados (expunge) en lugar de dejarlos marcados."
+          },
+          "post_action_ignore_skipped": {
+            "label": "Omitir propios y filtrados",
+            "help": "No aplicar la acción posterior a los correos omitidos (los tuyos y los de remitentes filtrados por la lista) (activado de forma predeterminada)."
+          },
+          "max_body_chars": {
+            "label": "Máx. de caracteres del cuerpo",
+            "help": "Truncar el cuerpo de cada correo a este número de caracteres (predeterminado 12000)."
+          },
+          "subject_prefix": {
+            "label": "Prefijo del asunto",
+            "help": "Prefijo que se añade al asunto de las respuestas (predeterminado \"Re: \")."
+          },
+          "allow_from": {
+            "label": "Remitentes permitidos",
+            "help": "Lista de direcciones autorizadas que pueden hablar con el agente (\"*\" permite a todos). Los remitentes no emparejados reciben un código de emparejamiento en la respuesta."
+          },
+          "verify_dkim": {
+            "label": "Verificar DKIM",
+            "help": "Exigir una cabecera Authentication-Results con dkim=pass. Desactivar DKIM y SPF a la vez acepta cabeceras From falsificadas."
+          },
+          "verify_spf": {
+            "label": "Verificar SPF",
+            "help": "Exigir una cabecera Authentication-Results con spf=pass. Desactivar DKIM y SPF a la vez acepta cabeceras From falsificadas."
+          },
+          "allowed_attachment_types": {
+            "label": "Tipos de adjunto permitidos",
+            "help": "Lista MIME permitida para adjuntos entrantes, p. ej. application/pdf o image/*. Déjala vacía para desactivar los adjuntos."
+          },
+          "max_attachment_size": {
+            "label": "Tamaño máx. de adjunto (bytes)",
+            "help": "Tamaño máximo por adjunto, en bytes (predeterminado 2000000 = 2 MB)."
+          },
+          "max_attachments_per_email": {
+            "label": "Máx. adjuntos por correo",
+            "help": "Cuántos adjuntos se aceptan de un mismo correo (predeterminado 5)."
+          },
+          "trusted_authserv_id": {
+            "label": "Servidor de autenticación de confianza",
+            "help": "authserv-id del servidor receptor, p. ej. mx.google.com. Tu proveedor debe eliminar las cabeceras Authentication-Results falsificadas entrantes que usen este ID. Obligatorio al verificar SPF o DKIM; vacío rechaza el correo entrante."
+          }
+        },
+        "websocket": {
+          "host": {
+            "label": "Host de escucha",
+            "help": "Dirección local a la que se enlaza el servidor WebSocket (predeterminada 127.0.0.1, solo local). Un host comodín como 0.0.0.0 o :: expone el servidor en todas las interfaces y se rechaza salvo que se configure un token o un secreto de emisión."
+          },
+          "port": {
+            "label": "Puerto de escucha",
+            "help": "Puerto local en el que escucha el servidor WebSocket (predeterminado 8765). Se ignora si se define una ruta de socket Unix."
+          },
+          "unix_socket_path": {
+            "label": "Ruta de socket Unix",
+            "help": "Ruta absoluta opcional. Si se define, el servidor escucha en este socket Unix en lugar del host y el puerto."
+          },
+          "path": {
+            "label": "Ruta de actualización",
+            "help": "Ruta de actualización WebSocket a la que se conectan los clientes (predeterminada /). Debe empezar por \"/\"."
+          },
+          "token": {
+            "label": "Token estático",
+            "help": "Secreto compartido que se valida con el parámetro token durante el handshake. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "token_issue_path": {
+            "label": "Ruta de emisión de tokens",
+            "help": "Ruta HTTP GET que entrega tokens de un solo uso y corta vida en JSON. Debe ser distinta de la ruta de actualización."
+          },
+          "token_issue_secret": {
+            "label": "Secreto de emisión",
+            "help": "Secreto Bearer que exige la ruta de emisión (Authorization: Bearer o X-Vibe-Trading-Auth). Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "token_ttl_s": {
+            "label": "TTL del token emitido (s)",
+            "help": "Vida útil del token emitido por la ruta de emisión, en segundos (30-86400, predeterminado 300)."
+          },
+          "websocket_requires_token": {
+            "label": "Exigir token",
+            "help": "Rechazar los handshakes que no presenten un token estático o emitido válido (activado de forma predeterminada)."
+          },
+          "allow_from": {
+            "label": "Clientes permitidos",
+            "help": "Lista de IDs de cliente autorizados a conectarse (\"*\" permite a todos, valor predeterminado)."
+          },
+          "streaming": {
+            "label": "Transmitir salida",
+            "help": "Enviar los deltas de salida del modelo a los clientes conectados mientras se generan."
+          },
+          "max_message_bytes": {
+            "label": "Máx. bytes por mensaje",
+            "help": "Tamaño máximo del frame entrante, en bytes (predeterminado 37748736; 1024-41943040)."
+          },
+          "ping_interval_s": {
+            "label": "Intervalo de ping (s)",
+            "help": "Segundos entre pings de keepalive (5-300, predeterminado 20)."
+          },
+          "ping_timeout_s": {
+            "label": "Timeout de ping (s)",
+            "help": "Segundos de espera de una respuesta de ping antes de cerrar la conexión (5-300, predeterminado 20)."
+          },
+          "ssl_certfile": {
+            "label": "Ruta del certificado TLS",
+            "help": "Ruta del certificado PEM en el servidor para WSS. Configura certificado y clave juntos o ninguno; son rutas de archivo del servidor, no material subido."
+          },
+          "ssl_keyfile": {
+            "label": "Ruta de la clave TLS",
+            "help": "Ruta de la clave privada PEM en el servidor para WSS. Configura certificado y clave juntos o ninguno; son rutas de archivo del servidor, no material subido."
+          }
+        },
+        "feishu": {
+          "app_id": {
+            "label": "App ID",
+            "help": "El App ID de la aplicación en la consola de desarrolladores de Feishu / Lark (empieza por cli_)."
+          },
+          "app_secret": {
+            "label": "App Secret",
+            "help": "El App Secret de la aplicación. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "encrypt_key": {
+            "label": "Encrypt Key",
+            "help": "La Encrypt Key de la configuración de suscripción a eventos; opcional en el modo de conexión persistente."
+          },
+          "verification_token": {
+            "label": "Verification Token",
+            "help": "El Verification Token de la configuración de suscripción a eventos; opcional en el modo de conexión persistente."
+          },
+          "allow_from": {
+            "label": "Remitentes permitidos",
+            "help": "Lista blanca opcional de IDs de remitentes de Feishu autorizados a hablar con el agente; vacía significa todos los que el bot puede ver."
+          },
+          "react_emoji": {
+            "label": "Emoji de procesamiento",
+            "help": "Emoji con el que el bot reacciona al mensaje entrante mientras el agente trabaja (por defecto THUMBSUP)."
+          },
+          "done_emoji": {
+            "label": "Emoji de finalización",
+            "help": "Emoji con el que reacciona al completarse la tarea; vacío para no reaccionar."
+          },
+          "tool_hint_prefix": {
+            "label": "Prefijo de pistas de herramientas",
+            "help": "Prefijo que se muestra antes de las pistas de herramientas en línea de la respuesta."
+          },
+          "group_policy": {
+            "label": "Política de grupos",
+            "help": "\"mention\": responde solo cuando se menciona al bot en grupos; \"open\": responde a todos los mensajes del grupo."
+          },
+          "reply_to_message": {
+            "label": "Citar el mensaje original",
+            "help": "Responder citando el mensaje original."
+          },
+          "streaming": {
+            "label": "Respuestas en streaming",
+            "help": "Emite la respuesta con ediciones en vivo de tarjetas mediante CardKit."
+          },
+          "domain": {
+            "label": "Dominio",
+            "help": "\"feishu\" para Feishu China (open.feishu.cn), \"lark\" para Lark internacional (open.larksuite.com)."
+          },
+          "topic_isolation": {
+            "label": "Sesiones por tema",
+            "help": "Asigna a cada tema del grupo su propia sesión del agente."
+          }
         }
       },
       "guides": {
@@ -547,6 +830,36 @@
           "step4": "Añade el bot a un grupo de QQ o chatea con él en privado, siguiendo las reglas de sandbox/publicación de la plataforma.",
           "step5": "Vuelve aquí, pulsa «Probar conexión» y activa el canal.",
           "docsLabel": "Abrir la QQ Open Platform"
+        },
+        "email": {
+          "title": "Guía de configuración de correo",
+          "intro": "El canal de correo sondea el buzón por IMAP y responde por SMTP, así que no necesita una URL de callback pública.",
+          "step1": "Obtén los hosts y puertos de IMAP y SMTP de tu proveedor (normalmente imap.<proveedor> en 993 y smtp.<proveedor> en 587).",
+          "step2": "Activa IMAP y SMTP en los ajustes de tu buzón y, si el proveedor lo exige (Gmail, QQ Mail y otros con verificación en dos pasos), crea una contraseña de aplicación.",
+          "step3": "Rellena las credenciales de IMAP y SMTP de arriba, define la dirección de remitente y añade tu propia dirección a «Remitentes permitidos».",
+          "step4": "Haz clic en «Probar conexión»: comprueba el inicio de sesión IMAP, la carpeta del buzón y el inicio de sesión SMTP.",
+          "step5": "Marca «Consentimiento otorgado» y activa el canal; las respuestas automáticas llegarán a los remitentes que superen las comprobaciones DKIM/SPF.",
+          "docsLabel": "Abrir la documentación de Vibe-Trading"
+        },
+        "websocket": {
+          "title": "Guía de configuración de WebSocket",
+          "intro": "El canal WebSocket ejecuta su propio servidor local al que los clientes se conectan por una URL WebSocket, así que no necesita una URL de callback pública.",
+          "step1": "Elige una dirección de escucha: mantén 127.0.0.1 para uso solo local, o define 0.0.0.0 / :: para exponer el servidor; un host comodín exige un token o un secreto de emisión.",
+          "step2": "Define un token estático, o una ruta de emisión con su secreto Bearer para que los clientes pidan tokens de corta vida.",
+          "step3": "Conecta los clientes con ws://host:port/path?client_id=...&token=...",
+          "step4": "Guardar con el canal en marcha cambia el servidor en caliente: los clientes conectados (incluido este chat de la interfaz web) se desconectan un momento y vuelven a conectarse.",
+          "step5": "Haz clic en «Probar conexión»: valida localmente el certificado y la clave SSL y la disponibilidad de la dirección.",
+          "docsLabel": "Abrir la documentación de Vibe-Trading"
+        },
+        "feishu": {
+          "title": "Configuración del bot de Feishu / Lark",
+          "intro": "Los bots de Feishu usan una conexión persistente por WebSocket, así que no necesitas IP pública ni webhook.",
+          "step1": "Crea una aplicación personalizada en la plataforma para desarrolladores de Feishu (open.feishu.cn), o créala por escaneo QR desde la terminal con vibe-trading channels login feishu, que guarda el App ID y el App Secret automáticamente.",
+          "step2": "Añade la capacidad de bot a la aplicación.",
+          "step3": "En Suscripción a eventos, suscríbete a «Recibir mensajes im.message.receive_v1» y elige el modo de conexión persistente.",
+          "step4": "Copia el App ID y el App Secret desde Credenciales e información básica y pégalos en los campos de arriba.",
+          "step5": "Crea una versión y publica la aplicación (con aprobación del administrador si tu tenant lo exige); después activa el canal: se aplica en caliente, sin reiniciar. En tenants internacionales de Lark, pon el dominio en lark.",
+          "docsLabel": "Abrir la plataforma para desarrolladores de Feishu"
         }
       }
     },
@@ -622,7 +935,8 @@
     "authentication": "Autenticación",
     "apiKey": "Clave de API",
     "tushareTokenDesc": "Usado para datos de acciones A, futuros, fondos y macro de China. Si no se configura, el proyecto recurre a AKShare cuando está disponible.",
-    "gildataTokenDesc": "Fuente opcional de Gildata (Hundsun Juyuan) para acciones A de China. Si se configura, se une al final de la cadena de respaldo de acciones A con barras diarias ajustadas."
+    "gildataTokenDesc": "Fuente opcional de Gildata (Hundsun Juyuan) para acciones A de China. Si se configura, se une al final de la cadena de respaldo de acciones A con barras diarias ajustadas.",
+    "reasoningEffortXhigh": "Muy alto"
   },
   "qveris": {
     "title": "Mercado de herramientas QVeris",
@@ -705,6 +1019,7 @@
     "dropFiles": "Suelta los archivos aquí",
     "removeAttachment": "Eliminar {{filename}}",
     "uploadFailed": "Error al subir: {{error}}",
+    "messageTooLong": "El mensaje supera {{limit}} caracteres, incluidos los datos de los adjuntos y las instrucciones del equipo. Acórtalo antes de enviarlo.",
     "failedToSend": "Error al enviar el mensaje, intenta de nuevo.",
     "failedToContinue": "Error al continuar el objetivo, intenta de nuevo.",
     "runtimeBadge": "RUNTIME",
@@ -808,6 +1123,33 @@
     "reproducibility": "Reproducibilidad",
     "metrics": "Métricas",
     "validationPayload": "Validación",
+    "trust": {
+      "executionRecords": "Registros de ejecución",
+      "executionDescription": "Etapas de ejecución registradas y hashes de sus entradas y resultados.",
+      "noExecutionRecords": "No se guardaron registros de ejecución para esta ejecución.",
+      "startedAt": "Inicio (UTC)",
+      "endedAt": "Fin (UTC)",
+      "argsHash": "SHA-256 de los argumentos",
+      "resultHash": "SHA-256 del resultado",
+      "metricEvidence": "Evidencia de métricas",
+      "evidenceDescription": "Referencias a los datos de métricas guardados. Las sumas de comprobación identifican los archivos registrados; esta vista no los verifica de forma independiente.",
+      "noMetricEvidence": "No se registró evidencia de métricas para esta ejecución.",
+      "metric": "Métrica",
+      "artifact": "Artefacto",
+      "column": "Columna",
+      "row": "Fila de datos (desde 1, sin encabezado)",
+      "artifactHash": "SHA-256 del artefacto",
+      "tools": {
+        "backtest": "Backtest",
+        "load_data": "Cargar datos",
+        "generate_signals": "Generar señales"
+      },
+      "status": {
+        "ok": "Completado",
+        "error": "Fallido",
+        "cancelled": "Cancelado"
+      }
+    },
     "artifactChecksums": "Sumas de verificación de artefactos",
     "path": "Ruta",
     "size": "Tamaño",

@@ -31,6 +31,19 @@ class _EmptyRegistry:
         return []
 
 
+def test_sol_61_runtime_metadata_reports_effective_reasoning(monkeypatch) -> None:
+    monkeypatch.setenv("LANGCHAIN_PROVIDER", "openai-codex")
+    monkeypatch.setenv("LANGCHAIN_MODEL_NAME", "openai-codex/gpt-6.1-sol")
+    monkeypatch.setenv("LANGCHAIN_REASONING_EFFORT", "none")
+    reset_env_config()
+    monkeypatch.setattr(chat_module, "build_llm", lambda **kwargs: object())
+    try:
+        llm = ChatLLM()
+        assert llm.runtime_snapshot.reasoning_effort == "medium"
+    finally:
+        reset_env_config()
+
+
 def test_runtime_metadata_is_frozen_at_construction_with_model_override(
     monkeypatch,
     tmp_path: Path,

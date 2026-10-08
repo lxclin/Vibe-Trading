@@ -15,7 +15,13 @@
     "base_url_env": "OPENAI_BASE_URL",
     "default_model": "gpt-5.5",
     "default_base_url": "https://api.openai.com/v1",
-    "api_key_required": true
+    "api_key_required": true,
+    "suggested_models": [
+      "gpt-6.1-sol",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-5.5"
+    ]
   },
   {
     "name": "anthropic",
@@ -31,16 +37,18 @@
     "label": "OpenAI Codex (ChatGPT OAuth)",
     "api_key_env": null,
     "base_url_env": "OPENAI_CODEX_BASE_URL",
-    "default_model": "openai-codex/gpt-5.6-sol",
+    "default_model": "openai-codex/gpt-6.1-sol",
     "default_base_url": "https://chatgpt.com/backend-api/codex/responses",
     "api_key_required": false,
     "auth_type": "oauth",
     "login_command": "vibe-trading provider login openai-codex",
     "suggested_models": [
-      "openai-codex/gpt-5.6-sol",
-      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-6.1-sol",
       "openai-codex/gpt-6-sol",
-      "openai-codex/gpt-6-luna"
+      "openai-codex/gpt-6-luna",
+      "openai-codex/gpt-6-astra",
+      "openai-codex/gpt-5.6-sol",
+      "openai-codex/gpt-5.6-luna"
     ]
   },
   {

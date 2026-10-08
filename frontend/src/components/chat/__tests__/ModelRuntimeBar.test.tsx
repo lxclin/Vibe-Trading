@@ -154,3 +154,22 @@ describe("ModelRuntimeBar", () => {
     expect(screen.getByRole("button", { name: "ChatGPT" })).toBeDisabled();
   });
 });
+
+it("supports Sol 6.1, hides disabled reasoning and offers xhigh", () => {
+  const onReasoningEffortChange = vi.fn();
+  const onChatGptModelChange = vi.fn();
+  render(
+    <ModelRuntimeBar
+      settings={{ ...settings, provider: "openai-codex", model_name: "openai-codex/gpt-6.1-sol", reasoning_effort: "none" }}
+      onChatGptModelChange={onChatGptModelChange}
+      onReasoningEffortChange={onReasoningEffortChange}
+    />,
+  );
+  expect(screen.getByRole("combobox", { name: "Model Name ChatGPT" })).toHaveValue("openai-codex/gpt-6.1-sol");
+  const effort = screen.getByRole("combobox", { name: "Reasoning Effort" });
+  expect(effort).toHaveValue("medium");
+  expect(effort.querySelector('option[value="none"]')).toBeNull();
+  expect(effort.querySelector('option[value="xhigh"]')).not.toBeNull();
+  fireEvent.change(effort, { target: { value: "xhigh" } });
+  expect(onReasoningEffortChange).toHaveBeenCalledWith("xhigh");
+});

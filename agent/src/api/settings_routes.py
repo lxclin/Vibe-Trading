@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.config.accessor import get_env_value, reset_env_config
+from src.providers.model_options import normalize_reasoning_effort
 
 # Agent root (agent/) — resolved from this file's location (agent/src/api/).
 _AGENT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -172,7 +173,7 @@ LLM_PROVIDERS = _load_llm_providers()
 LLM_PROVIDER_BY_NAME = {provider.name: provider for provider in LLM_PROVIDERS}
 # "" leaves the setting unset (Off); "none" is an explicit value direct OpenAI
 # needs to allow function tools on gpt-5.6-* models.
-LLM_REASONING_EFFORTS = {"", "none", "low", "medium", "high", "max"}
+LLM_REASONING_EFFORTS = {"", "none", "low", "medium", "high", "xhigh", "max"}
 LLM_API_KEY_PLACEHOLDERS = {"", "sk-or-v1-your-key-here", "sk-xxx", "xxx", "gsk_xxx"}
 TUSHARE_TOKEN_PLACEHOLDERS = {"", "your-tushare-token"}
 GILDATA_TOKEN_PLACEHOLDERS = {"", "your-gildata-token"}
@@ -646,10 +647,13 @@ def register_settings_routes(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "Reasoning effort must be none, low, medium, high, or max, "
+                    "Reasoning effort must be none, low, medium, high, xhigh, or max, "
                     "or empty to leave it unset"
                 ),
             )
+
+        if provider_name in {"openai", "openai-codex"}:
+            reasoning_effort = normalize_reasoning_effort(model_name, reasoning_effort)
 
         current_values = _read_settings_env_values()
         base_url = (

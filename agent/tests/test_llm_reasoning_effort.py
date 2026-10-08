@@ -731,7 +731,21 @@ class TestSettingsAllowlist:
         from src.api.settings_routes import LLM_REASONING_EFFORTS
 
         assert "none" in LLM_REASONING_EFFORTS
+        assert "xhigh" in LLM_REASONING_EFFORTS
         assert "" in LLM_REASONING_EFFORTS, "empty still means 'leave unset'"
+
+    def test_sol_61_migrates_legacy_none_and_accepts_xhigh(
+        self, settings_client: TestClient, settings_env_path: Path
+    ) -> None:
+        payload = _settings_payload("none")
+        payload["model_name"] = "gpt-6.1-sol"
+        response = settings_client.put("/settings/llm", json=payload)
+        assert response.status_code == 200
+        assert "LANGCHAIN_REASONING_EFFORT=medium" in settings_env_path.read_text()
+        payload["reasoning_effort"] = "xhigh"
+        response = settings_client.put("/settings/llm", json=payload)
+        assert response.status_code == 200
+        assert "LANGCHAIN_REASONING_EFFORT=xhigh" in settings_env_path.read_text()
 
     def test_none_persists_through_the_settings_endpoint(
         self, settings_client: TestClient, settings_env_path: Path
@@ -753,3 +767,24 @@ class TestSettingsAllowlist:
         detail = response.json()["detail"]
         for value in ("none", "low", "medium", "high", "max"):
             assert value in detail, f"{value} missing from validation message"
+
+
+def test_sol_61_official_api_routes_tools_to_responses_with_valid_reasoning() -> None:
+    kwargs = _capture_kwargs({
+        "LANGCHAIN_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test",
+        "LANGCHAIN_MODEL_NAME": "gpt-6.1-sol", "LANGCHAIN_REASONING_EFFORT": "none",
+        "LANGCHAIN_USE_RESPONSES_API": "false",
+    })
+    assert kwargs["use_responses_api"] is True
+    assert kwargs["output_version"] == "responses/v1"
+    assert kwargs["reasoning"] == {"effort": "medium"}
+    assert kwargs["reasoning_effort"] is None
+
+
+def test_sol_61_model_name_does_not_change_third_party_gateway_transport() -> None:
+    kwargs = _capture_kwargs({
+        "LANGCHAIN_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test",
+        "OPENAI_BASE_URL": "https://gateway.example/v1",
+        "LANGCHAIN_MODEL_NAME": "gpt-6.1-sol", "LANGCHAIN_USE_RESPONSES_API": "false",
+    })
+    assert kwargs["use_responses_api"] is False

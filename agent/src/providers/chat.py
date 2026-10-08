@@ -128,6 +128,9 @@ class LLMResponse:
         response_model: Model identifier reported by the provider response,
             when available. This is authoritative runtime metadata and must
             not be inferred from the model's natural-language self-report.
+        provider_items: Opaque output items the provider needs back verbatim
+            on the next request of the same turn chain (the Codex backend's
+            encrypted reasoning items). Never shown, never summarised.
     """
 
     content: Optional[str] = None
@@ -137,6 +140,7 @@ class LLMResponse:
     usage_metadata: Optional[Dict[str, int]] = None
     content_filter_triggered: bool = False
     response_model: Optional[str] = None
+    provider_items: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_tool_calls(self) -> bool:
@@ -342,10 +346,14 @@ class ChatLLM:
             model_name or runtime_cfg.langchain_model_name
         ).strip()
         self.model_name = configured_model
+        from .model_options import normalize_reasoning_effort
+
         self.runtime_snapshot = LLMRuntimeSnapshot(
             provider=runtime_cfg.langchain_provider.strip().lower() or "openai",
             configured_model=configured_model,
-            reasoning_effort=runtime_cfg.langchain_reasoning_effort.strip().lower(),
+            reasoning_effort=normalize_reasoning_effort(
+                configured_model, runtime_cfg.langchain_reasoning_effort
+            ),
         )
 
     def close(self) -> None:
@@ -682,6 +690,7 @@ class ChatLLM:
             usage_metadata=usage,
             content_filter_triggered=content_filter_triggered,
             response_model=response_model,
+            provider_items=list(additional_kwargs.get("provider_items") or []),
         )
 
 

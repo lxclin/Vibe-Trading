@@ -12,7 +12,6 @@ from src.agent.context import ContextBuilder
 from src.agent.loop import AgentLoop
 from src.agent.tools import ToolRegistry
 from src.agent.trace import TraceWriter
-from src.tools.fund_flow_tool import FundFlowTool
 from src.tools.get_fundamentals_tool import GetFundamentalsTool
 from src.tools.block_trades_tool import BlockTradesTool
 from src.tools.financial_statements_tool import FinancialStatementsTool
@@ -168,6 +167,9 @@ def test_cleared_result_replays_run_scoped_readonly_cache(monkeypatch, tmp_path:
 
     calls: list[dict[str, object]] = []
     tool = FundFlowTool()
+    # Query tools now allow refreshes. Exercise the non-repeatable cache
+    # contract explicitly instead of depending on FundFlowTool's defaults.
+    monkeypatch.setattr(tool, "repeatable", False)
     assert not tool.repeatable, "test needs a non-repeatable tool to have a gate at all"
     assert tool.is_readonly, "run-scoped replay is restricted to readonly tools"
 

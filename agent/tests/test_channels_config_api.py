@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +24,18 @@ from fastapi.testclient import TestClient
 import api_server
 from src.api import channels_config_routes as routes
 from src.api import state as api_state
+from src.channels import email_probe
 from src.channels.dingtalk import DINGTALK_AVAILABLE, DingTalkChannel
 
 CLIENT_ID = "ding-client-id-1234567890"
 STORED_SECRET = "stored-secret-abcdefghij"
 UNSAVED_SECRET = "unsaved-secret-xyz987654321"
+EMAIL_IMAP_PASSWORD = "email-imap-password-987654321"
+EMAIL_SMTP_PASSWORD = "email-smtp-password-123456789"
+WS_TOKEN = "ws-token-secret-abcdefghij"
+WS_ISSUE_SECRET = "ws-issue-secret-987654321"
+FEISHU_APP_ID = "cli_feishu_app_id_1234567890"
+FEISHU_STORED_SECRET = "feishu-stored-secret-abcdefghij"
 
 # Captured before any test monkeypatches httpx, so repeated injections in a
 # single test still wrap the real client (test_dingtalk_connection_test idiom).
@@ -133,6 +141,37 @@ def _dingtalk_section(**overrides: Any) -> dict[str, Any]:
     return section
 
 
+def _email_section(**overrides: Any) -> dict[str, Any]:
+    section: dict[str, Any] = {
+        "enabled": False,
+        "imap_host": "imap.example.com",
+        "imap_username": "bot@example.com",
+        "imap_password": EMAIL_IMAP_PASSWORD,
+        "smtp_host": "smtp.example.com",
+        "smtp_username": "sender@example.com",
+        "smtp_password": EMAIL_SMTP_PASSWORD,
+    }
+    section.update(overrides)
+    return section
+
+
+def _feishu_section(**overrides: Any) -> dict[str, Any]:
+    section: dict[str, Any] = {
+        "enabled": False,
+        "app_id": FEISHU_APP_ID,
+        "app_secret": FEISHU_STORED_SECRET,
+    }
+    section.update(overrides)
+    return section
+
+
+def _free_port() -> int:
+    """Return a loopback port the OS just handed out (free at bind time)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
 def _inject_mock_transport(
     monkeypatch: pytest.MonkeyPatch, handler: Any
 ) -> list[httpx.Request]:
@@ -190,6 +229,30 @@ def test_get_masks_secrets_and_reports_writable(tmp_path: Path, monkeypatch) -> 
     assert STORED_SECRET not in response.text
     # GET is read-only: it must not build the runtime singleton.
     assert api_server._channel_runtime is None
+
+
+def test_get_feishu_masks_secrets_and_reports_test_support(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, _ = _client(tmp_path, monkeypatch, channels={"feishu": _feishu_section()})
+
+    response = client.get("/channels/config")
+
+    assert response.status_code == 200
+    entry = response.json()["channels"]["feishu"]
+    assert entry["display_name"] == "Feishu"
+    assert entry["supports_test"] is True
+    assert entry["values"]["app_id"] == FEISHU_APP_ID
+    assert entry["values"]["enabled"] is False
+    assert "app_secret" not in entry["values"]
+    assert entry["secrets"]["app_secret"] == {"set": True, "masked": "****ghij"}
+    keys = [field["key"] for field in entry["fields"]]
+    assert keys[:2] == ["app_id", "app_secret"]
+    assert "enabled" not in keys
+    app_id_hint = next(f for f in entry["fields"] if f["key"] == "app_id")
+    assert app_id_hint["help_key"] == "settings.channels.fields.feishu.app_id"
+    assert app_id_hint["secret"] is False
+    assert FEISHU_STORED_SECRET not in response.text
 
 
 def test_get_excludes_non_channel_helper_modules(tmp_path: Path, monkeypatch) -> None:
@@ -298,6 +361,80 @@ def test_pristine_form_roundtrip_validates_for_typed_fields(
     assert "form-typed-secret-xyz987654321" not in response.text
 
 
+def test_feishu_pristine_form_roundtrip_validates_for_typed_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Same roundtrip for Feishu's typed fields (Literal domain/group_policy,
+    ``None``-default done_emoji, bools) through the ``tenant_access_token`` probe."""
+    client, _ = _client(tmp_path, monkeypatch, channels={})
+    entry = client.get("/channels/config").json()["channels"]["feishu"]
+
+    patch: dict[str, Any] = {}
+    for field in entry["fields"]:
+        if field["secret"]:
+            continue
+        value = entry["values"].get(field["key"])
+        if field["type"] == "list":
+            patch[field["key"]] = value if isinstance(value, list) else []
+        elif field["type"] == "bool":
+            patch[field["key"]] = bool(value)
+        else:
+            patch[field["key"]] = "" if value is None else str(value)
+    patch["app_id"] = "cli_round_trip_app"
+    patch["app_secret"] = "form-typed-feishu-secret-xyz987654321"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "open.feishu.cn" in str(request.url)
+        return httpx.Response(
+            200, json={"tenant_access_token": "probe-token-do-not-leak"}
+        )
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.post("/channels/feishu/test", json={"config": patch})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True, body
+    assert body["code"] == "ok"
+    assert len(requests) == 1
+    assert "form-typed-feishu-secret-xyz987654321" not in response.text
+    assert "probe-token-do-not-leak" not in response.text
+
+
+def test_email_pristine_form_roundtrip_normalizes_nullable_text_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The generic form must not turn nullable Email fields into invalid blanks."""
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"email": _email_section()}
+    )
+    entry = client.get("/channels/config").json()["channels"]["email"]
+
+    patch: dict[str, Any] = {}
+    for field in entry["fields"]:
+        if field["secret"]:
+            continue
+        value = entry["values"].get(field["key"])
+        if field["type"] == "list":
+            patch[field["key"]] = value if isinstance(value, list) else []
+        elif field["type"] == "bool":
+            patch[field["key"]] = bool(value)
+        else:
+            patch[field["key"]] = "" if value is None else str(value)
+
+    patch["max_attachments_per_email"] = "4"
+
+    response = client.put("/channels/config/email", json={"config": patch})
+
+    assert response.status_code == 200, response.text
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["email"]
+    assert on_disk["max_attachments_per_email"] == "4"
+    assert on_disk["post_action"] is None
+    assert on_disk["post_action_move_mailbox"] is None
+    assert EMAIL_IMAP_PASSWORD not in response.text
+    assert EMAIL_SMTP_PASSWORD not in response.text
+
 def test_display_config_path_relativizes_home() -> None:
     home = Path.home()
 
@@ -376,6 +513,54 @@ def test_put_enable_with_bad_credentials_is_blocked_before_write(
     assert path.read_bytes() == before
     assert api_server._channel_runtime is None
     assert STORED_SECRET not in response.text
+
+
+def test_put_feishu_merge_patch_writes_section(tmp_path: Path, monkeypatch) -> None:
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"feishu": _feishu_section()}
+    )
+
+    response = client.put(
+        "/channels/config/feishu",
+        json={"config": {"domain": "lark", "react_emoji": "OK"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["applied"] == "deferred"
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["feishu"]
+    assert on_disk["domain"] == "lark"
+    assert on_disk["react_emoji"] == "OK"
+    # A secret absent from the patch keeps its stored value.
+    assert on_disk["app_secret"] == FEISHU_STORED_SECRET
+    assert FEISHU_STORED_SECRET not in response.text
+
+
+def test_put_feishu_enable_with_bad_credentials_is_blocked_before_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Feishu rejects bad credentials with HTTP 200 + an error body; the
+    enable-transition probe must still block the write with 422."""
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"feishu": _feishu_section()}
+    )
+    before = path.read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 10014, "msg": "app secret invalid"})
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.put("/channels/config/feishu", json={"config": {"enabled": True}})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_credentials"
+    assert detail["fields"] == []
+    assert len(requests) == 1
+    assert "open.feishu.cn" in str(requests[0].url)
+    assert path.read_bytes() == before
+    assert api_server._channel_runtime is None
+    assert FEISHU_STORED_SECRET not in response.text
 
 
 def test_put_enable_rejection_carries_scrubbed_message(tmp_path: Path, monkeypatch) -> None:
@@ -809,7 +994,7 @@ def test_post_test_honors_pending_secret_clear(tmp_path: Path, monkeypatch) -> N
 
 def test_post_test_unsupported_channel_short_circuits(tmp_path: Path, monkeypatch) -> None:
     client, path = _client(
-        tmp_path, monkeypatch, channels={"email": {"enabled": False}}
+        tmp_path, monkeypatch, channels={"telegram": {"enabled": False}}
     )
     before = path.read_bytes()
 
@@ -818,7 +1003,7 @@ def test_post_test_unsupported_channel_short_circuits(tmp_path: Path, monkeypatc
 
     requests = _inject_mock_transport(monkeypatch, handler)
 
-    response = client.post("/channels/email/test", json={})
+    response = client.post("/channels/telegram/test", json={})
 
     assert response.status_code == 200
     body = response.json()
@@ -879,3 +1064,301 @@ def test_no_secret_value_in_any_response_body(tmp_path: Path, monkeypatch) -> No
     assert [r.status_code for r in responses] == [200, 422, 200, 200]
     for response in responses:
         assert STORED_SECRET not in response.text
+
+
+# --------------------------------------------------------------------------- #
+# Email + WebSocket: guided-channel parity (hot config backend support)
+# --------------------------------------------------------------------------- #
+
+
+def test_put_websocket_minimal_section_is_not_a_type_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression: the ephemeral websocket build needs the gateway kwarg.
+
+    ``WebSocketChannel.__init__`` requires a keyword-only ``gateway``, which
+    ``_build_ephemeral`` did not pass — so every PUT of a websocket section
+    died as a 422 ``TypeError`` validation envelope before anything else ran.
+    """
+    port = _free_port()
+    client, path = _client(tmp_path, monkeypatch, channels={})
+
+    response = client.put(
+        "/channels/config/websocket",
+        json={"config": {"enabled": False, "host": "127.0.0.1", "port": port}},
+    )
+
+    assert response.status_code != 422
+    assert response.status_code == 200
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["websocket"]
+    assert on_disk["host"] == "127.0.0.1"
+    assert on_disk["port"] == port
+
+
+def test_post_websocket_test_returns_probe_code_not_unsupported(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, path = _client(tmp_path, monkeypatch, channels={})
+    before = path.read_bytes()
+
+    response = client.post("/channels/websocket/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] in {"ok", "invalid_credentials", "network"}
+    assert body["code"] != "unsupported"
+    assert body["tested_saved_config"] is True
+    # The test endpoint never persists anything.
+    assert path.read_bytes() == before
+
+
+def test_post_email_test_empty_config_reports_missing_credentials(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, path = _client(tmp_path, monkeypatch, channels={})
+    before = path.read_bytes()
+
+    response = client.post("/channels/email/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["code"] == "invalid_credentials"
+    assert body["detail"] == (
+        "missing credentials: imap_host, imap_username, imap_password, "
+        "smtp_host, smtp_username, smtp_password"
+    )
+    assert body["sdk_available"] is True
+    assert path.read_bytes() == before
+
+
+def test_get_email_and_websocket_entries_have_help_keys_and_masked_secrets(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, _ = _client(
+        tmp_path,
+        monkeypatch,
+        channels={
+            "email": _email_section(),
+            "websocket": {
+                "enabled": False,
+                "token": WS_TOKEN,
+                "token_issue_secret": WS_ISSUE_SECRET,
+            },
+        },
+    )
+
+    response = client.get("/channels/config")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    email_entry = payload["channels"]["email"]
+    assert email_entry["supports_test"] is True
+    hints = {field["key"]: field for field in email_entry["fields"]}
+    assert "enabled" not in hints
+    assert (
+        hints["imap_host"]["help_key"] == "settings.channels.fields.email.imap_host"
+    )
+    assert hints["imap_password"]["secret"] is True
+    assert hints["imap_password"]["type"] == "password"
+    assert email_entry["values"]["imap_host"] == "imap.example.com"
+    assert "imap_password" not in email_entry["values"]
+    assert "smtp_password" not in email_entry["values"]
+    assert email_entry["secrets"]["imap_password"]["set"] is True
+    assert email_entry["secrets"]["imap_password"]["masked"].startswith("****")
+    assert email_entry["secrets"]["smtp_password"]["set"] is True
+
+    ws_entry = payload["channels"]["websocket"]
+    assert ws_entry["supports_test"] is True
+    ws_hints = {field["key"]: field for field in ws_entry["fields"]}
+    assert "enabled" not in ws_hints
+    assert ws_hints["token"]["help_key"] == "settings.channels.fields.websocket.token"
+    assert ws_hints["token"]["secret"] is True
+    assert ws_hints["token_issue_secret"]["secret"] is True
+    # ssl_certfile/ssl_keyfile are filesystem paths, not secret material.
+    assert ws_hints["ssl_certfile"]["secret"] is False
+    assert ws_hints["ssl_keyfile"]["secret"] is False
+    assert "token" not in ws_entry["values"]
+    assert ws_entry["secrets"]["token"] == {"set": True, "masked": "****ghij"}
+    assert ws_entry["secrets"]["token_issue_secret"]["set"] is True
+
+    for secret in (
+        EMAIL_IMAP_PASSWORD,
+        EMAIL_SMTP_PASSWORD,
+        WS_TOKEN,
+        WS_ISSUE_SECRET,
+    ):
+        assert secret not in response.text
+
+
+def test_put_email_enable_probe_failure_blocks_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, path = _client(tmp_path, monkeypatch, channels={"email": _email_section()})
+    before = path.read_bytes()
+
+    async def failing_probe(config: Any) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "code": "invalid_credentials",
+            "detail": "imap: login failed",
+            "sdk_available": True,
+        }
+
+    monkeypatch.setattr(email_probe, "test_connection", failing_probe)
+
+    response = client.put("/channels/config/email", json={"config": {"enabled": True}})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_credentials"
+    assert detail["fields"] == []
+    assert detail["message"] == "imap: login failed"
+    # The security property: bad credentials never reach disk.
+    assert path.read_bytes() == before
+    assert EMAIL_IMAP_PASSWORD not in response.text
+
+
+def test_put_email_enable_skip_verify_bypasses_probe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, path = _client(tmp_path, monkeypatch, channels={"email": _email_section()})
+
+    async def exploding_probe(config: Any) -> dict[str, Any]:  # pragma: no cover
+        raise AssertionError("probe must not run with skip_verify")
+
+    monkeypatch.setattr(email_probe, "test_connection", exploding_probe)
+
+    response = client.put(
+        "/channels/config/email",
+        json={"config": {"enabled": True}, "skip_verify": True},
+    )
+
+    assert response.status_code == 200
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["email"]
+    assert on_disk["enabled"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Hint-authoritative secret resolution (websocket token-shaped non-secrets)
+# --------------------------------------------------------------------------- #
+
+
+def _websocket_section(**overrides: Any) -> dict[str, Any]:
+    section: dict[str, Any] = {
+        "enabled": False,
+        "websocket_requires_token": True,
+        "token_ttl_s": 300,
+        "token_issue_path": "/issue",
+        "token": "s3cret-value",
+    }
+    section.update(overrides)
+    return section
+
+
+def test_get_websocket_token_shaped_non_secrets_stay_in_values(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, _ = _client(
+        tmp_path, monkeypatch, channels={"websocket": _websocket_section()}
+    )
+
+    response = client.get("/channels/config")
+
+    assert response.status_code == 200
+    entry = response.json()["channels"]["websocket"]
+    assert entry["values"]["websocket_requires_token"] is True
+    assert entry["values"]["token_ttl_s"] == 300
+    assert entry["values"]["token_issue_path"] == "/issue"
+    assert "token" not in entry["values"]
+    assert entry["secrets"]["token"] == {"set": True, "masked": "****alue"}
+    assert "s3cret-value" not in response.text
+
+
+def test_put_websocket_form_patch_preserves_requires_token(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The exact security-flip regression: a form save must not write False.
+
+    Before hint-authoritative secret resolution, ``websocket_requires_token``
+    was regex-masked out of GET ``values``; the bool widget then seeded
+    ``Boolean(undefined) = false`` and buildPatch always includes bool fields,
+    so ANY save silently disabled the WS handshake token requirement.
+    """
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"websocket": _websocket_section()}
+    )
+    patch: dict[str, Any] = {
+        "enabled": False,
+        "host": "127.0.0.1",
+        "port": _free_port(),
+        "unix_socket_path": "",
+        "path": "/",
+        "token_issue_path": "/issue",
+        "token_ttl_s": "600",
+        "websocket_requires_token": True,
+        "allow_from": ["*"],
+        "streaming": True,
+        "max_message_bytes": "37748736",
+        "ping_interval_s": "20",
+        "ping_timeout_s": "20",
+        "ssl_certfile": "",
+        "ssl_keyfile": "",
+    }
+
+    response = client.put("/channels/config/websocket", json={"config": patch})
+
+    assert response.status_code == 200
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["websocket"]
+    assert on_disk["websocket_requires_token"] is True
+    # The writer persists the form patch verbatim; the adapter coerces types.
+    assert on_disk["token_ttl_s"] == "600"
+    assert on_disk["token_issue_path"] == "/issue"
+    # A secret absent from the patch keeps its stored value.
+    assert on_disk["token"] == "s3cret-value"
+    assert "s3cret-value" not in response.text
+
+
+def test_put_websocket_clears_non_secret_token_issue_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A cleared non-secret text field persists as "" (no longer dropped)."""
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"websocket": _websocket_section()}
+    )
+
+    response = client.put(
+        "/channels/config/websocket", json={"config": {"token_issue_path": ""}}
+    )
+
+    assert response.status_code == 200
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["websocket"]
+    assert on_disk["token_issue_path"] == ""
+    assert on_disk["token"] == "s3cret-value"
+def test_email_test_normalizes_blank_nullable_fields_without_persisting(tmp_path, monkeypatch):
+    client, path = _client(tmp_path, monkeypatch, channels={"email": _email_section()})
+    before = path.read_bytes()
+    seen = []
+    async def successful_probe(config):
+        seen.append(config.post_action)
+        return {"ok": True, "code": "ok", "detail": "connected", "sdk_available": True}
+    monkeypatch.setattr(email_probe, "test_connection", successful_probe)
+    response = client.post("/channels/email/test", json={"config": {"post_action": "", "max_attachments_per_email": 7}})
+    assert response.status_code == 200 and response.json()["ok"] is True
+    assert seen == [None]
+    assert path.read_bytes() == before
+    response = client.post("/channels/email/test", json={"config": {"post_action": "invalid"}})
+    assert response.status_code == 200 and response.json()["ok"] is False
+    assert response.json()["code"] == "invalid_credentials" and seen == [None]
+    assert response.json()["detail"].startswith("validation_error:")
+
+
+def test_email_authentication_trust_anchor_is_editable_in_generic_form(tmp_path, monkeypatch):
+    client, path = _client(tmp_path, monkeypatch, channels={"email": _email_section()})
+    entry = client.get("/channels/config").json()["channels"]["email"]
+    field = next(field for field in entry["fields"] if field["key"] == "trusted_authserv_id")
+    assert field["help_key"] == "settings.channels.fields.email.trusted_authserv_id"
+    response = client.put("/channels/config/email", json={"config": {"trusted_authserv_id": "mx.example.test"}})
+    assert response.status_code == 200
+    assert json.loads(path.read_text())["channels"]["email"]["trusted_authserv_id"] == "mx.example.test"
