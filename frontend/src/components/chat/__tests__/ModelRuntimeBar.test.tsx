@@ -119,6 +119,21 @@ describe("ModelRuntimeBar", () => {
     expect(onReasoningEffortChange).toHaveBeenCalledWith("max");
   });
 
+  it("selects 6.1 Sol and preserves it as a known model", () => {
+    const onChatGptModelChange = vi.fn();
+    render(
+      <ModelRuntimeBar
+        settings={{ ...settings, provider: "openai-codex", model_name: "openai-codex/gpt-6.1-sol" }}
+        onChatGptModelChange={onChatGptModelChange}
+      />,
+    );
+    const picker = screen.getByRole("combobox", { name: "Model Name ChatGPT" });
+    expect(picker).toHaveValue("openai-codex/gpt-6.1-sol");
+    expect(screen.getAllByRole("option", { name: "6.1 Sol" })).toHaveLength(1);
+    fireEvent.change(picker, { target: { value: "openai-codex/gpt-6.1-sol" } });
+    expect(onChatGptModelChange).toHaveBeenCalledWith("openai-codex/gpt-6.1-sol");
+  });
+
   it("shows the configured custom Codex model instead of claiming 5.6 Sol", () => {
     render(
       <ModelRuntimeBar

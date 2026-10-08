@@ -5,6 +5,7 @@ import type { LLMSettings } from "@/lib/api";
 type OpenAICodexModel =
   | "openai-codex/gpt-5.6-sol"
   | "openai-codex/gpt-5.6-luna"
+  | "openai-codex/gpt-6.1-sol"
   | "openai-codex/gpt-6-sol"
   | "openai-codex/gpt-6-luna";
 
@@ -54,6 +55,7 @@ export function ModelRuntimeBar({
     [
       "openai-codex/gpt-5.6-sol",
       "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-6.1-sol",
       "openai-codex/gpt-6-sol",
       "openai-codex/gpt-6-luna",
     ] as const
@@ -124,6 +126,7 @@ export function ModelRuntimeBar({
             {!knownChatGptModel && <option value={chatGptModel}>{chatGptModel}</option>}
             <option value="openai-codex/gpt-5.6-sol">5.6 Sol</option>
             <option value="openai-codex/gpt-5.6-luna">5.6 Luna</option>
+            <option value="openai-codex/gpt-6.1-sol">6.1 Sol</option>
             <option value="openai-codex/gpt-6-sol">6 Sol</option>
             <option value="openai-codex/gpt-6-luna">6 Luna</option>
           </select>

@@ -69,6 +69,7 @@ PROVIDERS: Final[tuple[Provider, ...]] = (
              "openai-codex/gpt-5.6-sol", None, "OPENAI_CODEX_BASE_URL",
              "https://chatgpt.com/backend-api/codex/responses", None,
              ("openai-codex/gpt-5.6-sol", "openai-codex/gpt-5.6-luna",
+              "openai-codex/gpt-6.1-sol",
               "openai-codex/gpt-6-sol", "openai-codex/gpt-6-luna",
               "openai-codex/gpt-5.4")),
     Provider("deepseek", "DeepSeek",
