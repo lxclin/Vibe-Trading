@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from src.agent.grounding.decision import decision_coverage
+from src.agent.grounding.research_plan import company_research_plan
 
 _RESEARCH_RE = re.compile(
     r"买入|值得买|能买吗|买什么|推荐.{0,6}买|投资价值|估值|市盈率|市净率|盈利质量|正常化盈利|"
@@ -214,7 +215,11 @@ def _financial_consistency(facts: Mapping[str, Any]) -> list[dict[str, Any]]:
     return checks
 
 
-def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequence[Any]) -> dict[str, Any]:
+def equity_worksheet(
+    records: Sequence[Any], symbols: set[str], attempts: Sequence[Any], *,
+    company_names: Mapping[str, Sequence[str]] | None = None,
+    research_attempts: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Select same-period facts and expose missing work without fabricating it."""
     companies = sorted(symbol for symbol in symbols if is_mainland_company(symbol))
     sheets = []
@@ -258,6 +263,13 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
                     ][:4]}
 
         coverage = decision_coverage(records, symbol, attempts)
+        names = (company_names or {}).get(symbol, [])
+        sector_fields = {record.field.rsplit(".", 1)[-1].upper() for record in financials}
+        sector = ("bank" if sector_fields.intersection({"NONPERLOAN", "NET_INTEREST_MARGIN"}) or any("银行" in name for name in names)
+                  else "insurance" if sector_fields.intersection({"EARNED_PREMIUM", "NET_ROI", "NBV_LIFE"}) or any(
+                      "保险" in name or "人寿" in name for name in names)
+                  else "financial" if sector_fields.intersection(_FINANCIAL_SECTOR_FIELDS) or any("证券" in name for name in names)
+                  else "industrial")
         income_attempted = any(
             isinstance(attempt, dict) and attempt.get("symbol") == symbol
             and attempt.get("tool") == "get_financial_statements"
@@ -297,6 +309,9 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
                             "quote adjustment before using them. Annual EPS is historical, not normalized or TTM.",
             },
             "next_statement_reads": _supplementary_tasks(records, symbol, attempts),
+            "source_research_plan": company_research_plan(
+                symbol, names, period, coverage, research_attempts or [], sector=sector,
+            ) if research_attempts is not None else None,
             "research_progress": {
                 "quote": coverage["raw_quote"]["status"],
                 "provider_multiples": coverage["valuation_multiple"]["status"],
@@ -336,6 +351,10 @@ def equity_research_guidance(chinese: bool) -> str:
             "只补需要的报表，同一失败请求不重复；报价工具已内置腾讯备用来源，仍失败时披露缺口，不把失败当看空。"
             "工作表中的unchecked是不曾查询，unavailable是查询未得到，observed_analysis_pending仅代表数据已取得，不能冒充分析完成。"
             "工作表列出next_statement_reads时，先执行尚未尝试的补查再写最终报告，不能只把可查问题列成未来清单。"
+            "基础报价和同期财报齐备后，source_research_plan列出历史/同行估值及盈利驱动的priority_actions。"
+            "工具可用且迭代预算允许时按顺序补查，复用已取正文；每个主题仅建议一次定向搜索和一次候选正文读取，必要时按pagination继续读同一文档；失败后说明缺口，不重复相同搜索。"
+            "source_candidates_found仅表示取得链接，source_read_analysis_pending表示已读但仍须核对日期、股本、业务和会计口径，不能写成已验证估值或正常化盈利。"
+            "临近工具预算结束时，用已有证据完成有边界的报告，不为补查清单再开启循环。"
             "若行情源缺PE/PB，继续核对工作表中的BPS、全年EPS和股本变动，口径一致时用financial_rigor计算参考PB或历史PE，"
             "标明报价日与报期；新上市、拆股、增发前的每股数据尤其要核对分母。无法对齐时说明具体冲突，不能机械换算。"
             "读取公告网页只有释义、摘要或页面附带行情时，不能称为已读完整财报；继续定位交易所/公司原始PDF及财务表或附注，"
@@ -355,6 +374,9 @@ def equity_research_guidance(chinese: bool) -> str:
             "安全边际=1−现价÷基准估值。它们分母不同，不要混称。亏损企业不采用PE；使用其他适合的方法。"
             "计算正确不代表假设可靠；没有合理假设就说明无法量化，仍给出已有证据支持的相对排序，不编目标价或胜率。"
             "三、回答：保留‘盈利质量’和‘估值与价格’两节，可简短。第一段说明是初筛排序、条件性偏好，还是已论证当前买入；"
+            "紧接结论分别写公司判断、当前价格判断和当前行动，逐项给出支持证据；公司判断可为偏积极/中性/偏谨慎，价格判断可为有吸引力/合理/偏贵/依据不足。"
+            "‘研究未完成’只限定尚未论证的部分，仍须回答已有证据支持的公司质量和相对偏好；不得凭数据缺失把公司判断写成偏谨慎。"
+            "列出最影响结论的两项缺口，并说明各自什么核验结果会令判断上调或下调，避免只写‘补齐资料后再评估’。"
             "比较时对每个候选写当前判断、关键依据与改变条件；仅有低PE/高增长只能支持初筛，不能升级成当前买入建议。"
             "证据不足时说明具体缺口和结论边界，不能把未查询变成看空；有证据时明确作出判断，不用平衡措辞代替回答。"
             "当前入场结论采用：可考虑买入、公司值得关注但价格偏贵、暂不买入（等待）、回避、研究未完成。"
@@ -371,6 +393,11 @@ def equity_research_guidance(chinese: bool) -> str:
         "Reuse quotes and financials; retrieve missing quarterly indicators/income/cashflow only as needed. "
         "Unchecked means not queried; unavailable means attempted without usable evidence. Observed inputs still require analysis. "
         "Execute unattempted next_statement_reads before finalizing, instead of turning retrievable gaps into a generic checklist. "
+        "Once quotes and matching financials are present, source_research_plan supplies concrete valuation-benchmark and earnings-driver "
+        "priority_actions. When tools and iteration budget permit, follow those actions, reuse existing pages, and stop after one scoped "
+        "search and one candidate read recommendation per topic, paginating that document only if needed. "
+        "Found links are leads; read pages still need date, accounting and share-basis review. "
+        "Near the tool budget limit, finish a bounded report from existing evidence instead of opening another research loop. "
         "When provider PE/PB is missing, examine BPS, annual EPS and share changes; use financial_rigor for a provisional "
         "historical PE or PB only with compatible share and price bases. Pre-IPO EPS is not automatically comparable. "
         "A filing page containing only a glossary, preview or quote sidebar is not a full filing. Try one alternative "
@@ -392,6 +419,9 @@ def equity_research_guidance(chinese: bool) -> str:
         "Do not use PE for loss-makers, skill examples as data, or calculator output as evidence assumptions are true. "
         "If inputs are unavailable, give a bounded relative ranking without invented targets or win rates. "
         "Identify whether the answer is screening, a conditional preference, or a supported current-entry view. "
+        "Separate company-quality view, current-price assessment and current action, each with its supporting evidence. "
+        "Scope research incomplete to the unproven part; preserve supported business-quality or relative preferences. "
+        "Name the two gaps most likely to change the decision and explain what result would move the view up or down. "
         "Missing research is not bearish evidence; low PE and high past growth alone support screening, not a buy verdict. "
         "Use favorable / expensive / wait / avoid / research incomplete for current entry. Missing essential price, earnings "
         "or valuation basis means research incomplete; preserve any bounded screening preference separately. "

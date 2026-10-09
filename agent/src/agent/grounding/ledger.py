@@ -37,6 +37,7 @@ from src.agent.grounding.equity_research import (
 from src.agent.grounding.figures import Figure, parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
 from src.agent.grounding.registry import GROUNDING_CHECKS
+from src.agent.grounding.research_plan import research_attempt
 from src.agent.grounding.release import (
     MAX_GROUNDING_RECOVERY_ROUNDS,
     MAX_PRICE_EVIDENCE_ATTEMPTS,
@@ -179,6 +180,7 @@ class GroundingLedger(
         self._evidence: list[EvidenceRecord] = []
         self._tool_failures: list[dict[str, Any]] = []
         self._decision_tool_attempts: list[dict[str, Any]] = []
+        self._source_research_attempts: list[dict[str, Any]] = []
         self._analysis_completed: list[dict[str, Any]] = []
         self._analysis_metrics: list[dict[str, Any]] = []
         self._validations: list[dict[str, Any]] = []
@@ -423,6 +425,13 @@ class GroundingLedger(
             success: Result-envelope success classification.
         """
         payload = _json_object(result)
+        if self._equity_entry_inputs_required and tool_name in {"web_search", "read_url"}:
+            attempt = research_attempt(
+                tool_name, arguments, payload, call_id, success,
+                self._research_company_names(), self._source_research_attempts,
+            )
+            if attempt:
+                self._source_research_attempts.append(attempt)
         if (self._decision_required or self._equity_research_required) and tool_name in {
             "get_a_share_valuation", "get_financial_statements"
         }:
@@ -483,7 +492,26 @@ class GroundingLedger(
 
     def equity_research_worksheet(self) -> dict[str, Any]:
         """Expose an inventory to the model without promoting assumptions to facts."""
-        return equity_worksheet(self._evidence, self.authorized_symbols, self._decision_tool_attempts)
+        return equity_worksheet(
+            self._evidence, self.authorized_symbols, self._decision_tool_attempts,
+            company_names=self._research_company_names(),
+            research_attempts=self._source_research_attempts if self._equity_entry_inputs_required else None,
+        )
+
+    def _research_company_names(self) -> dict[str, list[str]]:
+        """Use names attached to the locked listing, never a previous subject."""
+        companies = {symbol: [] for symbol in sorted(self.authorized_symbols)
+                     if re.fullmatch(r"\d{6}\.(?:SH|SZ|BJ)", symbol) and not symbol.startswith(("5", "1"))}
+        for identity in self._identities.values():
+            if identity.status != "locked" or identity.symbol not in companies:
+                continue
+            for candidate in identity.candidates:
+                name = candidate.get("name")
+                name = name.strip()[:60] if isinstance(name, str) else ""
+                if (_normalize_symbol(candidate.get("symbol")) == identity.symbol
+                        and name and name not in companies[identity.symbol] and len(companies[identity.symbol]) < 3):
+                    companies[identity.symbol].append(name)
+        return companies
 
     def revalidate(self, content: str) -> ValidationResult:
         """Validate text WITHOUT counting it as a rejected draft.
@@ -604,6 +632,7 @@ class GroundingLedger(
                 "evidence": [asdict(record) for record in self._evidence],
                 "tool_failures": list(self._tool_failures),
                 "decision_tool_attempts": list(self._decision_tool_attempts),
+                "source_research_attempts": list(self._source_research_attempts),
                 "equity_research_context": self._equity_research_question if self._equity_research_required else None,
                 "research_coverage": (
                     decision_coverage(
