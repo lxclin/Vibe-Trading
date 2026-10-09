@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -186,6 +187,7 @@ class SwarmAgentSpec(BaseModel):
         timeout_seconds: Worker timeout in seconds.
         model_name: Override default model; None uses global config.
         max_retries: Maximum retry attempts on failure.
+        research_worksheet: Opt into a local financial evidence inventory.
     """
 
     id: str
@@ -197,6 +199,7 @@ class SwarmAgentSpec(BaseModel):
     timeout_seconds: int = 300
     model_name: str | None = None
     max_retries: int = 2
+    research_worksheet: bool = False
 
 
 class SwarmTask(BaseModel):
@@ -314,6 +317,7 @@ class WorkerResult(BaseModel):
 
     Attributes:
         status: WorkerStatus — completed|failed|timeout|token_limit|incomplete.
+        research_worksheet: Local tool-derived inventory, never a verified thesis.
         summary: Execution summary.
         artifact_paths: List of generated artifact file paths.
         iterations: Actual ReAct iterations executed.
@@ -323,6 +327,7 @@ class WorkerResult(BaseModel):
     """
 
     status: WorkerStatus
+    research_worksheet: dict[str, Any] | None = None
     summary: str
     artifact_paths: list[str] = Field(default_factory=list)
     iterations: int = 0

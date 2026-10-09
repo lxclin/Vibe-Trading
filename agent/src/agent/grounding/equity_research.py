@@ -17,14 +17,14 @@ from src.agent.grounding.research_plan import company_research_plan
 
 _RESEARCH_RE = re.compile(
     r"买入|值得买|能买吗|买什么|推荐.{0,6}买|投资价值|估值|市盈率|市净率|盈利质量|正常化盈利|"
-    r"胜率|更好.{0,8}标的|别的.{0,8}标的|"
-    r"\b(?:buy|valuation|undervalued|overvalued|earnings quality|better investment)\b",
+    r"胜率|更好.{0,8}标的|别的.{0,8}标的|做多|做空|"
+    r"\b(?:buy|valuation|undervalued|overvalued|earnings quality|better investment|long or short|go long|go short|long thesis|short thesis)\b",
     re.IGNORECASE,
 )
 _META_RE = re.compile(r"提示词|怎么问|如何提问|编写代码|代码实现|代码怎么写|修改代码|修复代码|程序|项目|prompt|bug", re.IGNORECASE)
 _ENTRY_RE = re.compile(
-    r"买入|值得买|能买吗|买什么|推荐我.{0,6}买(?:什么|哪)|胜率|(?:更好|别的)[^。！？\n]{0,8}标的|"
-    r"\b(?:buy|worth buying|better investment)\b",
+    r"买入|值得买|能买吗|买什么|推荐我.{0,6}买(?:什么|哪)|胜率|做多|做空|(?:更好|别的)[^。！？\n]{0,8}标的|"
+    r"\b(?:buy|worth buying|better investment|long or short|go long|go short|long thesis|short thesis)\b",
     re.IGNORECASE,
 )
 _COMPANY_FOLLOWUP_RE = re.compile(
@@ -53,6 +53,7 @@ _FIELDS = {
     "impairment": ("ASSET_IMPAIRMENT_INCOME",),
     "gross_profit": ("MLR",),
     "gross_margin_pct": ("XSMLL",),
+    "weighted_roe_pct": ("ROEJQ",),
 }
 
 
@@ -179,6 +180,16 @@ def _financial_consistency(facts: Mapping[str, Any]) -> list[dict[str, Any]]:
     Consolidated equity is deliberately not compared with parent-company BPS.
     """
     checks = []
+    # Deliberately review flags, not invalidation: unusually high margins or
+    # ROE can be real, but must not silently become evidence of durable quality.
+    for key, threshold in (("gross_margin_pct", 80), ("weighted_roe_pct", 60)):
+        fact = facts.get(key, {})
+        if "value" in fact and abs(fact["value"]) > threshold:
+            checks.append({"check": "unusual_" + key, "status": "review_needed",
+                           "reported_pct": fact["value"], "review_threshold_pct": threshold,
+                           "refs": [fact["ref"]],
+                           "reason": "Unusual ratio; review original filing, units, period and denominator. "
+                                     "This is neither proof of an error nor evidence of sustainable quality."})
     for key, fact in facts.items():
         if fact.get("status") == "conflicting":
             checks.append({"check": "conflicting_" + key, "status": "review_needed",

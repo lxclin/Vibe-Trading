@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.agent.context import ContextBuilder
+from src.agent.grounding import GroundingLedger
+from src.agent.grounding.equity_research import equity_research_guidance
 from src.agent.progress import HeartbeatTimer
 from src.agent.skills import SkillsLoader
 from src.agent.tools import BaseTool, ToolRegistry
@@ -225,6 +227,7 @@ def build_worker_prompt(
     upstream_summaries: dict[str, str],
     skill_descriptions: str,
     grounding_block: str = "",
+    available_tools: list[str] | None = None,
 ) -> str:
     """Build the worker's system prompt with role, upstream context, and skills.
 
@@ -237,6 +240,8 @@ def build_worker_prompt(
             ahead of the Execution Rules section so the worker sees real
             recent prices before any tool decision. Empty string skips the
             section entirely.
+        available_tools: Actual registered tool names; defaults to the preset
+            whitelist for callers that only render a prompt.
 
     Returns:
         Complete system prompt string for the worker LLM.
@@ -249,14 +254,32 @@ def build_worker_prompt(
     # data, the current date) is appended after, in the same relative order
     # as before -- a cache hit only needs a stable *prefix*, so moving the
     # variable tail doesn't need to preserve position, only what precedes it.
+    tools = set(agent_spec.tools if available_tools is None else available_tools)
     prompt_parts = [f"## Role\n\n{agent_spec.role}"]
+    prompt_parts.append(
+        "## Runtime capabilities\n\nActually registered tools: " + ", ".join(sorted(tools))
+        + ". Only these tools can be called. This is one role inside an already running team; "
+        "do not claim the team preset was not invoked because this worker has no run_swarm tool. "
+        "A missing tool is a capability limit, not a failed data lookup."
+    )
+    if agent_spec.research_worksheet:
+        prompt_parts.append(equity_research_guidance(chinese=False))
+        prompt_parts.append(
+            "For committee roles, the final direction may be long / short / wait / research incomplete. "
+            "Separate directional research from execution and borrow availability. "
+            "Use shared upstream evidence first; only fetch missing or conflicting items. "
+            "The worksheet below covers this worker's own tool observations only; an empty local slot "
+            "does not invalidate properly sourced upstream evidence. Do not claim inherited figures "
+            "were independently verified. Financial-consistency review flags require investigation "
+            "or an explicit limitation before those fields support a positive quality judgment."
+        )
 
     if skill_descriptions and skill_descriptions != "(no matching skills)":
         prompt_parts.append(
             f"## Available Skills (use load_skill to access full documentation)\n\n{skill_descriptions}"
         )
 
-    if "get_market_data" in (agent_spec.tools or []):
+    if "get_market_data" in tools:
         prompt_parts.append(
             "## Market Data Tool Policy\n\n"
             "For OHLCV price bars, recent closes, volume, technical indicators, "
@@ -280,7 +303,7 @@ def build_worker_prompt(
         "volumes, fund flows, market-cap rankings, sector weights, ETF codes, "
         "ticker recommendations — MUST be traceable to one of:\n"
         "  (a) a tool call result obtained in THIS run,\n"
-        "  (b) the Ground Truth block above (if present),\n"
+        "  (b) the Market Data Snapshot block (legacy Ground Truth, if present),\n"
         "  (c) the Upstream Context above (if present and the upstream agent "
         "itself sourced it from (a) or (b)).\n\n"
         "You may NOT cite numbers from memory or training data. Markets have "
@@ -336,18 +359,20 @@ def build_worker_prompt(
     # SKIPPED: short-circuit convention, buried the marker several
     # paragraphs in under markdown decoration instead of leading with it
     # as their own role instructions require.
-    has_code_tools = bool({"write_file", "bash", "edit_file"} & set(agent_spec.tools or []))
-    if has_code_tools:
+    if "write_file" in tools:
+        execution_steps = (
+            "- Use assigned data tools first. For calculations that need code, write one focused script "
+            "with write_file and execute it with bash. Do not substitute scripts for available data tools.\n"
+            if "bash" in tools else
+            "- Call assigned data/analysis tools directly. There is no bash tool in this worker; "
+            "do not write scripts you cannot execute. Use financial_rigor for arithmetic when available.\n"
+        )
         prompt_parts.append(
             "## Execution Rules\n\n"
             "You have a HARD LIMIT of 20 tool calls. After that you will be cut off. Work efficiently.\n\n"
             "**Phase 1 — Plan (0 tool calls):** Before calling any tool, state your plan in 3-5 bullet points.\n\n"
             "**Phase 2 — Execute (≤15 tool calls):**\n"
-            "- `load_skill` first to get data access methods and analysis patterns.\n"
-            "- Write ONE focused Python script via `write_file`, then run it with `bash python script.py`.\n"
-            "- Do NOT write long Python code inside bash. Use write_file + bash.\n"
-            "- Do NOT fetch data with curl/requests. Use the patterns from load_skill (yfinance, OKX API via Python).\n"
-            "- If a script fails, read the error, fix with `edit_file`, re-run. Max 2 retries per script.\n\n"
+            + execution_steps + "\n"
             "**Phase 3 — Summarize (MUST use write_file):**\n"
             "- You MUST call `write_file` with path `report.md` to save your final report as a markdown file.\n"
             "- This is REQUIRED, not optional. Your final response MUST include a write_file call for report.md.\n"
@@ -360,9 +385,8 @@ def build_worker_prompt(
             "## Execution Rules\n\n"
             "You have a HARD LIMIT of 20 tool calls. After that you will be cut off. Work efficiently.\n\n"
             "**Plan (0 tool calls):** Before calling any tool, state your plan in 3-5 bullet points.\n\n"
-            "**Execute:** You do not have `write_file`/`bash`/`edit_file` in this role -- call your "
-            "assigned data/analysis tools directly to gather what your role needs. Do not attempt to "
-            "write or run a script; it is not possible with your tool whitelist.\n\n"
+            "**Execute:** Use the registered tools listed above to gather what your role needs. "
+            "Do not attempt calls to missing tools.\n\n"
             "**Summarize:** There is no report.md for this role. Output your final analysis directly "
             "as your plain-text response, in the exact format your role's instructions above require "
             "(including any short-circuit marker convention they describe).\n\n"
@@ -606,6 +630,7 @@ def _run_worker_impl(
     skill_desc = _filter_skill_descriptions(skills_loader, agent_spec.skills)
     system_prompt = build_worker_prompt(
         agent_spec, upstream_summaries, skill_desc, grounding_block=grounding_block,
+        available_tools=registry.tool_names,
     )
 
     # 4. Resolve prompt template with user vars (missing vars → LLM infers)
@@ -636,6 +661,17 @@ def _run_worker_impl(
     artifact_dir = agent_artifact_dir(run_dir, agent_id, task_id)
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    # Inventory only: worker output contracts and the host's final release
+    # checks remain unchanged. Never ingest an upstream narrative as tool data.
+    research_ledger = GroundingLedger(
+        run_dir=artifact_dir,
+        user_message=user_prompt + "\nAssess whether to go long or short; 做多或做空研究。",
+    ) if agent_spec.research_worksheet else None
+    worksheet_message = None
+    if research_ledger is not None:
+        worksheet_message = {"role": "system", "content": ""}
+        messages.insert(1, worksheet_message)
+
     t0 = time.monotonic()
     iteration = 0
     summary = ""
@@ -653,6 +689,13 @@ def _run_worker_impl(
     stream_failure_streak = 0
 
     for iteration in range(max_iterations):
+        if research_ledger is not None and worksheet_message is not None:
+            worksheet_message["content"] = (
+                "[WORKER EQUITY RESEARCH WORKSHEET]\n"
+                "Local tool-derived inventory, not verified investment conclusions. "
+                "Reuse sourced upstream research separately; do not infer absence from empty local slots.\n"
+                + json.dumps(research_ledger.equity_research_worksheet(), ensure_ascii=False)
+            )
         # Microcompact: clear old tool results to prevent token bloat
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         if len(tool_msgs) > _KEEP_RECENT_TOOLS:
@@ -964,6 +1007,7 @@ def _run_worker_impl(
             _emit(event_callback, "worker_completed", agent_id, task_id, {"iterations": iteration + 1})
             return WorkerResult(
                 status="completed",
+                research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
                 summary=summary,
                 artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                 iterations=iteration + 1,
@@ -1024,6 +1068,11 @@ def _run_worker_impl(
                 else:
                     result = registry.execute(tc.name, args)
             result_is_error = _is_error_result(result)
+            if research_ledger is not None:
+                research_ledger.ingest_tool_result(
+                    tool_name=tc.name, arguments=args, result=result,
+                    call_id=tc.id, success=not result_is_error,
+                )
             if tc.name != "load_skill" and not result_is_error:
                 data_tool_calls += 1
             tc_elapsed = time.monotonic() - tc_start
@@ -1079,6 +1128,7 @@ def _run_worker_impl(
     _emit(event_callback, "worker_iteration_limit", agent_id, task_id)
     return WorkerResult(
         status="completed",
+        research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
         summary=summary,
         artifact_paths=_collect_artifacts(run_dir, artifact_dir),
         iterations=max_iterations,

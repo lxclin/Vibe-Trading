@@ -55,6 +55,7 @@ import math
 import re
 from datetime import date, timedelta
 from typing import Iterable
+from datetime import datetime, timezone
 
 from src.config.accessor import get_env_config
 
@@ -194,7 +195,7 @@ def fetch_grounding_data(
     # raw code; ``_detect_market`` is the function ``runner.py`` already uses
     # to dispatch the same shapes we extract here, so reusing it keeps the
     # routing identical to the rest of the codebase.
-    from backtest.loaders.registry import resolve_loader
+    from backtest.loaders.registry import resolve_loader, frame_caliber
     from backtest.runner import _detect_market
 
     out: dict[str, list[dict]] = {}
@@ -212,6 +213,17 @@ def fetch_grounding_data(
         if df is None or df.empty:
             logger.info("grounding: no data returned for %s", code)
             continue
+        source = getattr(loader, "name", None)
+        source = source if isinstance(source, str) else "unknown"
+        attrs = getattr(df, "attrs", {})
+        attrs = attrs if isinstance(attrs, dict) else {}
+        provenance = {
+            "source": source,
+            "adjustment": frame_caliber(df, source, market, code),
+            "volume_unit": (getattr(loader, "volume_units", None) or {}).get(market),
+            "quote_currency": attrs.get("quote_currency"),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
         rows: list[dict] = []
         for ts, row in df.iterrows():
             rows.append({
@@ -221,6 +233,7 @@ def fetch_grounding_data(
                 "low": float(row.get("low", 0.0)),
                 "close": float(row.get("close", 0.0)),
                 "volume": float(row.get("volume", 0.0)),
+                "_provenance": provenance,
             })
         if rows:
             out[code] = rows
@@ -260,7 +273,7 @@ def format_grounding_block(grounding: dict[str, list[dict]]) -> str:
         lines = [
             f"### {code}  (window {first_date} → {last_date})",
             "",
-            "| Date | Close | Volume |",
+            "| Date | Bar close field | Volume |",
             "| --- | ---: | ---: |",
         ]
         for row in rows[-PROMPT_TABLE_TAIL:]:
@@ -270,8 +283,16 @@ def format_grounding_block(grounding: dict[str, list[dict]]) -> str:
             lines.append(f"| {row['trade_date'][:10]} | {close_str} | {vol_str} |")
         lines.append("")
         lines.append(
-            f"**Latest close:** {last_close:.2f} ({last_close_date})  "
-            f"**Window range:** {window_low:.2f} – {window_high:.2f}"
+            f"**Latest bar close field:** {last_close:.2f} ({last_close_date})  "
+            f"**Window close range:** {window_low:.2f} – {window_high:.2f}"
+        )
+        meta = last_finite_row.get("_provenance") or {}
+        lines.append(
+            "Source: " + str(meta.get("source") or "unknown")
+            + "; adjustment: " + str(meta.get("adjustment") or "unknown")
+            + "; volume unit: " + str(meta.get("volume_unit") or "undeclared")
+            + "; quote currency: " + str(meta.get("quote_currency") or "undeclared")
+            + "; fetched at: " + str(meta.get("fetched_at") or "unknown")
         )
         sections.append("\n".join(lines))
 
@@ -279,8 +300,13 @@ def format_grounding_block(grounding: dict[str, list[dict]]) -> str:
         return ""
 
     header = (
-        "## Ground Truth — Recent Market Data\n\n"
-        "**These are the authoritative current prices for this run.** Do NOT "
+        "## Market Data Snapshot — Historical Bar Fields\n\n"
+        "**These are loader observations, not authoritative current or executable prices.** "
+        "A same-day bar may be incomplete: its close field is not a confirmed final session close. "
+        "Honor source, adjustment, volume unit and snapshot time; unknown metadata stays unknown. "
+        "Adjusted bars are for historical/technical context, not PE/PB calculations against raw per-share accounts. "
+        "Use get_a_share_valuation for a timestamped raw Shanghai/Shenzhen quote. "
+        "Do NOT "
         "cite prices, valuations, multiples, or returns from your training "
         "data — markets have moved. If you need a price outside this window, "
         "call `get_market_data` for the relevant range. When you state a "

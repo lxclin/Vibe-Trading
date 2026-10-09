@@ -96,7 +96,7 @@ _ACTIONABLE_MARKET_RE = re.compile(
     r"\bvaluation of\b|\bwhat (?:is|are) .{1,80} worth\b|"
     r"\bis .{1,80} (?:listed|publicly traded)\b|"
     r"买入|卖出|入场|目标价|现价|最新价|股价|交易价格|估值|值多少钱|"
-    r"值得买|能买吗|能否买|适合买|是否值得投资|"
+    r"值得买|能买吗|能否买|适合买|是否值得投资|做多|做空|\b(?:long or short|go long|go short)\b|"
     r".{1,40}(?:是否|有没有|已经|已)(?:在.{0,20})?上市)",
     re.IGNORECASE,
 )

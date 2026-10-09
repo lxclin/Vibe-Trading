@@ -8,6 +8,7 @@ with cancellation and event callback support.
 from __future__ import annotations
 
 import logging
+import json
 import random
 import shutil
 import threading
@@ -199,6 +200,7 @@ def _agent_spec_changed(prev: SwarmAgentSpec, new: SwarmAgentSpec) -> bool:
         or prev.max_retries != new.max_retries
         or prev.max_iterations != new.max_iterations
         or prev.timeout_seconds != new.timeout_seconds
+        or prev.research_worksheet != new.research_worksheet
     )
 
 
@@ -528,6 +530,24 @@ class SwarmRuntime:
                     run.total_output_tokens += result.output_tokens
 
                     if result.status == "completed":
+                        if (run.preset_name == "investment_committee" and tid == "task-evidence"
+                                and result.research_worksheet):
+                            # Share the framework's actual observations as well as
+                            # the researcher's prose. Never promote that prose into
+                            # another worker's independently observed evidence.
+                            packet = json.dumps(result.research_worksheet, ensure_ascii=False)
+                            if len(packet) <= 24000:
+                                result.summary += (
+                                    "\n\n## Shared tool-derived research worksheet\n"
+                                    "Observed inputs and review flags; not independently verified conclusions.\n"
+                                    + packet
+                                )
+                            else:
+                                result.summary += (
+                                    "\n\nShared worksheet exceeds context budget; use the cited evidence pack "
+                                    "and retain unresolved review flags. Full worksheet is saved in the "
+                                    "evidence worker's grounding_evidence.json artifact."
+                                )
                         task_summaries[tid] = result.summary
                         now_iso = datetime.now(timezone.utc).isoformat()
                         task_store.update_status(
