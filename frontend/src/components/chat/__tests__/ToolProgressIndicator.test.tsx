@@ -143,3 +143,12 @@ describe("ToolProgressIndicator", () => {
     expect(screen.getByText("5s")).toHaveAttribute("aria-hidden", "true");
   });
 });
+
+it("labels reused data and exhausted retries separately", () => {
+  render(<ToolProgressIndicator toolCalls={[
+    makeTc({ status: "ok", cached: true }),
+    makeTc({ id: "failed", status: "error", retry_exhausted: true }),
+  ]} />);
+  expect(screen.getByText("agent.activity.reusedData")).toBeInTheDocument();
+  expect(screen.getByText("agent.activity.retryLimit")).toBeInTheDocument();
+});

@@ -1058,6 +1058,10 @@
       "steps": "{{count}} langkah",
       "continue": "Lanjutkan",
       "reattach": "Lampirkan kembali",
+      "reusedData": "Menggunakan kembali data yang tersedia",
+      "retryLimit": "Batas percobaan tercapai; kueri dihentikan",
+      "waitingForAnalysis": "Menunggu analisis dan jawaban model",
+      "waitingForSource": "Menunggu hasil kueri",
       "checkingFigures": "Memeriksa angka dalam jawaban ini (putaran {{round}})…"
     },
     "resumeConnector": "Lanjutkan connector",

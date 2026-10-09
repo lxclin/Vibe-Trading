@@ -51,7 +51,7 @@ function formatStepElapsed(seconds: number): string {
  */
 const DETAIL_ARG_KEYS = [
   "name", "skill", "skill_name", "factor", "factor_id", "alpha_id",
-  "symbol", "symbols", "code", "query", "q", "keyword", "action",
+  "symbol", "symbols", "code", "codes", "query", "q", "keyword", "action",
   "path", "file", "filename", "url", "source", "id",
 ];
 
@@ -59,7 +59,7 @@ function truncateDetail(value: string, max = 42): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-function detailFor(entry: ToolCallEntry): string {
+export function toolArgumentDetail(entry: ToolCallEntry): string {
   const args = entry.arguments ?? {};
   for (const key of DETAIL_ARG_KEYS) {
     const value = args[key];
@@ -148,7 +148,7 @@ function ToolRow({ entries, eta }: RowProps): JSX.Element {
         : <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />;
 
   const localized = localizeToolName(entry.tool);
-  const details = [...new Set(entries.map(detailFor).filter(Boolean))];
+  const details = [...new Set(entries.map(toolArgumentDetail).filter(Boolean))];
   const detailText = details.slice(0, 3).join(", ") + (details.length > 3 ? ` +${details.length - 3}` : "");
 
   return (
@@ -162,6 +162,8 @@ function ToolRow({ entries, eta }: RowProps): JSX.Element {
             <span className="text-muted-foreground"> ×{entries.length}</span>
           )}
         </span>
+        {entry.cached && <span className="text-muted-foreground">{t("agent.activity.reusedData" as never)}</span>}
+        {entry.retry_exhausted && <span className="text-amber-600">{t("agent.activity.retryLimit" as never)}</span>}
         {detailText && (
           <span className="min-w-0 truncate text-muted-foreground/80">{detailText}</span>
         )}
@@ -244,6 +246,8 @@ export const ToolProgressIndicator = memo(function ToolProgressIndicator({
         && lastGroup
         && lastGroup[0].status === "ok"
         && lastGroup[0].tool === entry.tool
+        && lastGroup[0].cached === entry.cached
+        && lastGroup[0].retry_exhausted === entry.retry_exhausted
       ) {
         lastGroup.push(entry);
       } else {

@@ -129,3 +129,12 @@ describe("buildToolTimelineMessages attempt start", () => {
     expect(row.meta?.activity?.startedAt).toBe(1_785_342_408_000);
   });
 });
+
+it("preserves reused and retry-exhausted flags in history", () => {
+  const [message] = buildToolTimelineMessages([
+    { tool: "get_financial_statements", cached: true, status: "ok" },
+    { tool: "web_search", retry_exhausted: true, status: "error" },
+  ]);
+  expect(message.meta?.activity?.steps[0].cached).toBe(true);
+  expect(message.meta?.activity?.steps[1].retry_exhausted).toBe(true);
+});

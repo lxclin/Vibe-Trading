@@ -1058,6 +1058,10 @@
       "steps": "{{count}} pasos",
       "continue": "Continuar",
       "reattach": "Reconectar",
+      "reusedData": "Datos existentes reutilizados",
+      "retryLimit": "Límite de reintentos alcanzado; consulta detenida",
+      "waitingForAnalysis": "Esperando el análisis y la respuesta del modelo",
+      "waitingForSource": "Esperando el resultado de la consulta",
       "checkingFigures": "Verificando las cifras de esta respuesta (ronda {{round}})…"
     },
     "resumeConnector": "Reanudar conector",

@@ -839,6 +839,8 @@ export function Agent() {
           preview: String(d.preview || ""),
           elapsed_ms: Number(d.elapsed_ms || 0),
           elapsed_s: undefined,
+          cached: d.cached === true,
+          retry_exhausted: d.retry_exhausted === true,
           progress: undefined,
         });
         if (toolName === "run_swarm") {

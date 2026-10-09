@@ -207,6 +207,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
       ...agent,
       status: "running",
       tool: asString(data.tool, agent.tool || "?"),
+      queryState: undefined,
       iterations: Math.max(agent.iterations ?? 0, (asNumber(data.iteration) ?? (agent.iterations ?? 0)) + 1),
     }));
   }
@@ -218,6 +219,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
       return {
         ...agent,
         tool: `${tool} ${ok ? "ok" : "error"}`,
+        queryState: data.cached === true ? "cached" : data.retry_exhausted === true ? "retry_exhausted" : "model",
         elapsed_s: (asNumber(data.elapsed_ms) ?? 0) / 1000 || agent.elapsed_s,
       };
     });
@@ -228,6 +230,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
       ...agent,
       status: agent.status === "waiting" ? "running" : agent.status,
       tool: asString(data.tool, agent.tool || ""),
+      queryState: data.phase === "llm" ? "model" : undefined,
       elapsed_s: asNumber(data.elapsed_s) ?? agent.elapsed_s,
     }));
   }
@@ -246,6 +249,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
     return updateAgent(current, { agentId, taskId }, (agent) => ({
       ...agent,
       status: "done",
+      queryState: undefined,
       elapsed_s: agent.startedAt && eventTime
         ? Math.max(0, (eventTime - agent.startedAt) / 1000)
         : agent.elapsed_s,
@@ -258,6 +262,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
     return updateAgent(current, { agentId, taskId }, (agent) => ({
       ...agent,
       status: "failed",
+      queryState: undefined,
       elapsed_s: agent.startedAt && eventTime
         ? Math.max(0, (eventTime - agent.startedAt) / 1000)
         : agent.elapsed_s,
@@ -270,6 +275,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
     return updateAgent(current, { agentId, taskId }, (agent) => ({
       ...agent,
       status: "cancelled",
+      queryState: undefined,
       elapsed_s: agent.startedAt && eventTime
         ? Math.max(0, (eventTime - agent.startedAt) / 1000)
         : agent.elapsed_s,
@@ -282,6 +288,7 @@ export function applySwarmEvent(current: SwarmRunStatus, rawEvent: unknown): Swa
     return updateAgent(current, { agentId, taskId }, (agent) => ({
       ...agent,
       status: "blocked",
+      queryState: undefined,
       error: blockedBy ? `Blocked by ${blockedBy}` : agent.error,
     }));
   }

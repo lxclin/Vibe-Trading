@@ -2639,6 +2639,7 @@ class AgentLoop:
                     {
                         "status": "error",
                         "skipped": True,
+                        "error_code": "research_retry_limit",
                         "reason": "This exact call already failed repeatedly in this run. Change strategy or ask the user for help.",
                     }
                 )
@@ -2733,7 +2734,7 @@ class AgentLoop:
                 and dedup_key in self._called_ok
                 and (
                     not is_repeatable
-                    or tc.name in _RUN_STABLE_RESEARCH_TOOLS
+                    or (tc.name in _RUN_STABLE_RESEARCH_TOOLS and not tc.arguments.get("no_cache"))
                     or dedup_key in self._readonly_replay_protected
                 )
             ):
@@ -2747,8 +2748,20 @@ class AgentLoop:
                     if replay_restored
                     else f"{tc.name} already completed successfully. Use the previous result."
                 )
+                cached_result = self._readonly_replay_cache.get(dedup_key) if tc.name in _RUN_STABLE_RESEARCH_TOOLS else None
                 skip_msg = json.dumps({"skipped": True, "reason": reason})
-                messages.append(context.format_tool_result(tc.id, tc.name, skip_msg))
+                if cached_result is not None:
+                    original_call = next((call for call, key in self._successful_call_keys.items() if key == dedup_key), "")
+                    from src.agent.grounding.query_budget import reused_result
+                    skip_msg = reused_result({"call_id": original_call, "result": cached_result})
+                    self._emit("tool_call", {"tool": tc.name, "arguments": redact_payload(tc.arguments),
+                                             "call_id": tc.id, "iter": iteration})
+                    self._emit("tool_result", {"tool": tc.name, "status": "ok", "elapsed_ms": 0,
+                                               "call_id": tc.id, "cached": True, "original_call_id": original_call,
+                                               "preview": "Reused existing research data; original references and dates retained."})
+                    trace.write({"type": "tool_result_reused", "tool": tc.name, "call_id": tc.id,
+                                 "original_call_id": original_call, "iter": iteration})
+                messages.append(context.format_tool_result(tc.id, tc.name, truncate_tool_result(skip_msg)))
                 trace.write({"type": "tool_skipped", "iter": iteration, "tool": tc.name})
                 self._tool_progress.note("skipped", tc.name)
                 react_trace.append({"type": "tool_skipped", "tool": tc.name})
@@ -3235,6 +3248,8 @@ class AgentLoop:
                 return False
         except AttributeError:
             return False
+        if getattr(tool_def, "name", "") in _RUN_STABLE_RESEARCH_TOOLS:
+            return True
         if getattr(tool_def, "repeatable", False):
             return bool(getattr(tool_def, "replay_after_compaction", False))
         return True
@@ -3717,6 +3732,7 @@ class AgentLoop:
                 "preview": preview,
                 "call_id": tc.id,
                 **({"artifact": artifact} if artifact else {}),
+                "retry_exhausted": bool(not update_memory and _failure_code(result) == "research_retry_limit"),
             },
         )
 

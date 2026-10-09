@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { localizeToolName } from "@/lib/tools";
-import { ToolProgressIndicator } from "@/components/chat/ToolProgressIndicator";
+import { ToolProgressIndicator, toolArgumentDetail } from "@/components/chat/ToolProgressIndicator";
 import type { AgentActivity } from "@/stores/agent";
 
 interface ActivityLineProps {
@@ -129,9 +129,17 @@ export const ActivityLine = memo(function ActivityLine({
     if (activity.state === "done") {
       return `${t("agent.activity.done" as never)} · ${stepsLabel} · ${elapsed}`;
     }
-    const latest = newestStep ? localizeToolName(newestStep.tool) : "";
-    return [verb, latest, elapsed, stepsLabel].filter(Boolean).join(" · ");
-  }, [activity.state, elapsed, newestStep, stepsLabel, t, verb]);
+    const running = [...activity.steps].reverse().find((step) => step.status === "running");
+    if (!running && (newestStep || activity.state === "thinking") && activity.state !== "responding") {
+      return [t("agent.activity.waitingForAnalysis" as never), elapsed, stepsLabel].join(" · ");
+    }
+    const step = running ?? newestStep;
+    const latest = step ? localizeToolName(step.tool) : "";
+    const detail = step ? toolArgumentDetail(step) : "";
+    const waiting = running && (now - running.timestamp >= 30_000)
+      ? t("agent.activity.waitingForSource" as never) : "";
+    return [verb, latest, detail, waiting, elapsed, stepsLabel].filter(Boolean).join(" · ");
+  }, [activity.state, activity.steps, elapsed, newestStep, now, stepsLabel, t, verb]);
 
   return (
     <div

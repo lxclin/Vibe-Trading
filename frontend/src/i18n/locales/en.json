@@ -1058,6 +1058,10 @@
       "steps": "{{count}} steps",
       "continue": "Continue",
       "reattach": "Re-attach",
+      "reusedData": "Reused existing data",
+      "retryLimit": "Retry limit reached; query stopped",
+      "waitingForAnalysis": "Waiting for model analysis and response",
+      "waitingForSource": "Waiting for query response",
       "checkingFigures": "Checking the figures in this answer (round {{round}})…"
     },
     "resumeConnector": "Resume connector",

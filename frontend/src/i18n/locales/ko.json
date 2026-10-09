@@ -1053,6 +1053,10 @@
       "steps": "{{count}}단계",
       "continue": "계속",
       "reattach": "다시 연결",
+      "reusedData": "기존 데이터 재사용",
+      "retryLimit": "재시도 한도에 도달하여 조회 중단",
+      "waitingForAnalysis": "모델 분석 및 응답 대기 중",
+      "waitingForSource": "조회 결과 대기 중",
       "checkingFigures": "답변 속 수치 확인 중({{round}}차)…"
     },
     "resumeConnector": "커넥터 재개",

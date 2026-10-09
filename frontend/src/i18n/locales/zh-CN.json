@@ -1053,6 +1053,10 @@
       "steps": "{{count}} 个步骤",
       "continue": "继续",
       "reattach": "重新连接",
+      "reusedData": "复用已有数据",
+      "retryLimit": "失败已达上限，不再重复查询",
+      "waitingForAnalysis": "等待模型分析并组织回答",
+      "waitingForSource": "等待查询返回",
       "checkingFigures": "正在核对答案中的数字（第 {{round}} 轮）…"
     },
     "resumeConnector": "恢复连接器",

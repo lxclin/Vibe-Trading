@@ -1058,6 +1058,10 @@
       "steps": "{{count}} Schritte",
       "continue": "Fortsetzen",
       "reattach": "Erneut verbinden",
+      "reusedData": "Vorhandene Daten wiederverwendet",
+      "retryLimit": "Wiederholungslimit erreicht; Abfrage gestoppt",
+      "waitingForAnalysis": "Warten auf Modellanalyse und Antwort",
+      "waitingForSource": "Warten auf das Abfrageergebnis",
       "checkingFigures": "Zahlen in dieser Antwort werden geprüft (Runde {{round}}) …"
     },
     "resumeConnector": "Connector fortsetzen",

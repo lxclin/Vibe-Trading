@@ -13,6 +13,8 @@ export interface ToolTimelineEntry {
   status?: "running" | "ok" | "error";
   preview?: string;
   elapsed_ms?: number;
+  cached?: boolean;
+  retry_exhausted?: boolean;
   timestamp?: number;
 }
 
@@ -41,6 +43,8 @@ export function buildToolTimelineMessages(
     status: entry.status || "ok",
     preview: entry.preview,
     elapsed_ms: entry.elapsed_ms,
+    ...(entry.cached ? { cached: true } : {}),
+    ...(entry.retry_exhausted ? { retry_exhausted: true } : {}),
     timestamp: (
       typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
         ? entry.timestamp

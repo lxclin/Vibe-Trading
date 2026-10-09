@@ -18,6 +18,7 @@ export interface SwarmAgentStatus {
   role?: string;
   status: SwarmAgentDisplayStatus;
   tool?: string;
+  queryState?: "cached" | "retry_exhausted" | "model";
   elapsed_s?: number;
   iterations?: number;
   startedAt?: number;
@@ -65,6 +66,8 @@ export interface ToolCallEntry {
   status: "running" | "ok" | "error";
   preview?: string;
   elapsed_ms?: number;
+  cached?: boolean;
+  retry_exhausted?: boolean;
   /** Live elapsed seconds while the tool is running (heartbeat). */
   elapsed_s?: number;
   /**

@@ -163,7 +163,13 @@ function WideAgentRow({
         role="cell"
         title={agent.tool || ""}
       >
-        {agent.tool ? localizeToolName(agent.tool, agent.tool) : "-"}
+        {agent.queryState === "model"
+          ? t("agent.activity.waitingForAnalysis" as never)
+          : agent.queryState === "cached"
+            ? t("agent.activity.reusedData" as never)
+            : agent.queryState === "retry_exhausted"
+              ? t("agent.activity.retryLimit" as never)
+              : agent.tool ? localizeToolName(agent.tool, agent.tool) : "-"}
       </div>
       <div
         className="min-w-0 text-end font-mono text-[11px] text-muted-foreground"
@@ -230,7 +236,13 @@ function NarrowAgentCard({
       <div className="mt-2 flex min-w-0 items-center justify-between gap-3 font-mono text-[10px] text-muted-foreground">
         <span className="min-w-0 truncate" title={agent.tool || ""}>
           <span className="sr-only">{t("swarmStatus.tool")}</span>
-          {agent.tool ? localizeToolName(agent.tool, agent.tool) : "-"}
+          {agent.queryState === "model"
+          ? t("agent.activity.waitingForAnalysis" as never)
+          : agent.queryState === "cached"
+            ? t("agent.activity.reusedData" as never)
+            : agent.queryState === "retry_exhausted"
+              ? t("agent.activity.retryLimit" as never)
+              : agent.tool ? localizeToolName(agent.tool, agent.tool) : "-"}
         </span>
         <span className="shrink-0">
           <span className="sr-only">{t("swarmStatus.time")}</span>

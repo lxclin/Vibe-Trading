@@ -154,7 +154,7 @@ def test_identical_arguments_are_still_blocked(agent_factory) -> None:
     messages, _ = _drive(agent, tool.name, run_dir, [dict(args), dict(args)])
 
     assert len(tool.calls) == 1, "identical repeat executed twice"
-    assert _skipped(messages[1]), "identical repeat was not skipped"
+    assert json.loads(messages[1]["content"])["_research_reuse"]["original_call_id"] == "call_1"
 
 
 def test_argument_order_does_not_defeat_the_gate(agent_factory) -> None:
@@ -173,4 +173,4 @@ def test_argument_order_does_not_defeat_the_gate(agent_factory) -> None:
     )
 
     assert len(tool.calls) == 1, "key order was treated as a different call"
-    assert _skipped(messages[1])
+    assert json.loads(messages[1]["content"])["_research_reuse"]["original_call_id"] == "call_1"

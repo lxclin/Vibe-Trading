@@ -118,3 +118,18 @@ describe("swarmStatus cancellation events", () => {
     expect(cancelled.agents[0].status).toBe("cancelled");
   });
 });
+
+it("tracks reuse, retry exhaustion and model waiting without a stale tool label", () => {
+  let run = buildSwarmStatusFromStarted({ run_id: "r", status: "running", agents: [{ id: "analyst" }], tasks: [] })!;
+  const event = (type: string, data: Record<string, unknown>) => ({ type, agent_id: "analyst", data });
+  run = applySwarmEvent(run, event("tool_result", { tool: "get_financial_statements", status: "ok", cached: true }));
+  expect(run.agents[0].queryState).toBe("cached");
+  run = applySwarmEvent(run, event("task_heartbeat", { tool: "llm:default", phase: "llm" }));
+  expect(run.agents[0].queryState).toBe("model");
+  run = applySwarmEvent(run, event("tool_call", { tool: "web_search" }));
+  expect(run.agents[0].queryState).toBeUndefined();
+  run = applySwarmEvent(run, event("tool_result", { tool: "web_search", status: "error", retry_exhausted: true }));
+  expect(run.agents[0].queryState).toBe("retry_exhausted");
+  run = applySwarmEvent(run, event("worker_completed", {}));
+  expect(run.agents[0].queryState).toBeUndefined();
+});

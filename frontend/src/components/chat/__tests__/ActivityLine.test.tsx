@@ -144,3 +144,32 @@ describe("ActivityLine", () => {
     expect(formatActivityElapsed(65_000)).toBe("1m 5s");
   });
 });
+
+it("shows the query subject and waiting-source hint for a long call", () => {
+  vi.spyOn(Date, "now").mockReturnValue(45_000);
+  render(<ActivityLine activity={makeActivity({
+    verb: "readingMarketData",
+    steps: [{ id: "financial", tool: "get_financial_statements", arguments: { code: "601899.SH" }, status: "running", timestamp: 5000 }],
+  })} />);
+  expect(screen.getByRole("button")).toHaveTextContent("601899.SH");
+  expect(screen.getByRole("button")).toHaveTextContent("agent.activity.waitingForSource");
+  vi.restoreAllMocks();
+});
+
+it("shows model analysis after tools finish instead of the old query action", () => {
+  render(<ActivityLine activity={makeActivity({
+    steps: [{ id: "financial", tool: "get_financial_statements", arguments: {}, status: "ok", timestamp: 5000 }],
+  })} />);
+  expect(screen.getByRole("button")).toHaveTextContent("agent.activity.waitingForAnalysis");
+});
+
+it("keeps a running query visible when a later parallel query finished", () => {
+  render(<ActivityLine activity={makeActivity({
+    steps: [
+      { id: "slow", tool: "read_url", arguments: { url: "https://example.com/annual-report" }, status: "running", timestamp: Date.now() },
+      { id: "fast", tool: "get_financial_statements", arguments: { code: "601899.SH" }, status: "ok", timestamp: Date.now() },
+    ],
+  })} />);
+  expect(screen.getByRole("button")).toHaveTextContent("example.com/annual-report");
+  expect(screen.getByRole("button")).not.toHaveTextContent("agent.activity.waitingForAnalysis");
+});

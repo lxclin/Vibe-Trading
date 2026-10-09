@@ -18,7 +18,8 @@ from typing import Any, Callable
 from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
 from src.agent.grounding.equity_research import equity_research_guidance
-from src.agent.grounding.research_handoff import capture_receipt, merge_receipts
+from src.agent.grounding.research_handoff import capture_receipt, merge_receipts, scoped_receipts
+from src.agent.grounding.query_budget import ResearchQueryBudget, reused_result
 from src.agent.progress import HeartbeatTimer
 from src.agent.skills import SkillsLoader
 from src.agent.tools import BaseTool, ToolRegistry
@@ -677,6 +678,9 @@ def _run_worker_impl(
         research_ledger.ingest_research_handoff(
             research_receipts, source_call_id="upstream_team_tools",
         )
+    query_budget = ResearchQueryBudget(
+        scoped_receipts(research_receipts or [], research_ledger.authorized_symbols)
+    ) if research_ledger is not None else None
     worksheet_message = None
     if research_ledger is not None:
         worksheet_message = {"role": "system", "content": ""}
@@ -684,6 +688,7 @@ def _run_worker_impl(
 
     t0 = time.monotonic()
     iteration = 0
+    research_stall_rounds = 0
     summary = ""
     total_input_tokens = 0
     total_output_tokens = 0
@@ -729,6 +734,8 @@ def _run_worker_impl(
             _finalize_run(artifact_dir, summary, messages)
             return WorkerResult(
                 status="timeout",
+                research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                research_receipts=local_receipts,
                 summary=summary,
                 artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                 iterations=iteration,
@@ -748,6 +755,8 @@ def _run_worker_impl(
             _finalize_run(artifact_dir, summary, messages)
             return WorkerResult(
                 status="cancelled",
+                research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                research_receipts=local_receipts,
                 summary=summary,
                 artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                 iterations=iteration,
@@ -767,6 +776,8 @@ def _run_worker_impl(
             _finalize_run(artifact_dir, summary, messages)
             return WorkerResult(
                 status="token_limit",
+                research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                research_receipts=local_receipts,
                 summary=summary,
                 artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                 iterations=iteration,
@@ -802,7 +813,13 @@ def _run_worker_impl(
 
         # On last iteration, call LLM without tool definitions to force text output
         is_last_iteration = iteration == max_iterations - 1
-        tool_defs = None if is_last_iteration else registry.get_definitions()
+        force_research_summary = query_budget is not None and research_stall_rounds >= 3
+        if force_research_summary:
+            messages.append({"role": "user", "content":
+                "[SYSTEM] Three research rounds produced only reused data or failed/refused queries. "
+                "Stop requesting tools. Deliver your complete bounded analysis from the current worksheet and original references, "
+                "with explicit gaps and separate company quality, price attractiveness, direction and action. Missing data is not a wait/avoid thesis."})
+        tool_defs = None if is_last_iteration or force_research_summary else registry.get_definitions()
 
         # Stream the LLM — moonshot/kimi non-streaming invoke is unreliable
         # (issue #42), and streaming also feeds dashboard live progress.
@@ -913,6 +930,8 @@ def _run_worker_impl(
                 _finalize_run(artifact_dir, summary, messages)
                 return WorkerResult(
                     status="cancelled",
+                    research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                    research_receipts=local_receipts,
                     summary=summary,
                     artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                     iterations=iteration,
@@ -928,6 +947,8 @@ def _run_worker_impl(
             _emit(event_callback, "worker_failed", agent_id, task_id, {"error": error_msg})
             return WorkerResult(
                 status="failed",
+                research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                research_receipts=local_receipts,
                 summary=_resolve_summary(artifact_dir, last_assistant_content or ""),
                 artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                 iterations=iteration,
@@ -965,6 +986,8 @@ def _run_worker_impl(
                 _finalize_run(artifact_dir, summary, messages)
                 return WorkerResult(
                     status="failed",
+                    research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                    research_receipts=local_receipts,
                     summary=summary,
                     artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                     iterations=iteration + 1,
@@ -1010,6 +1033,8 @@ def _run_worker_impl(
                       {"iterations": iteration + 1, "reason": reason})
                 return WorkerResult(
                     status="incomplete",
+                    research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                    research_receipts=local_receipts,
                     summary=summary,
                     artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                     iterations=iteration + 1,
@@ -1035,6 +1060,15 @@ def _run_worker_impl(
                 ),
             )
 
+        if force_research_summary:
+            error = "Research retry/reuse budget exhausted; a plain-text report was required."
+            _emit(event_callback, "worker_incomplete", agent_id, task_id, {"iterations": iteration + 1, "reason": error})
+            _finalize_run(artifact_dir, last_assistant_content, messages)
+            return WorkerResult(status="incomplete", summary="", error=error, iterations=iteration + 1,
+                                research_worksheet=research_ledger.equity_research_worksheet(), research_receipts=local_receipts,
+                                artifact_paths=_collect_artifacts(run_dir, artifact_dir),
+                                input_tokens=total_input_tokens, output_tokens=total_output_tokens)
+        query_round_progress = False
         # Append assistant message with tool calls
         messages.append(
             ContextBuilder.format_assistant_tool_calls(
@@ -1059,6 +1093,8 @@ def _run_worker_impl(
                 registry.get(tc.name), tc.arguments, artifact_dir
             )
 
+            reused = query_budget.lookup(tc.name, args) if query_budget and run_dir_refusal is None else None
+            budget_blocked = bool(query_budget and reused is None and query_budget.blocked(tc.name, args))
             # Wrap tool execution in a heartbeat so the events.jsonl tail has a
             # fresh timestamp every few seconds. The stale-run reaper relies on
             # this signal to tell a hung tool call apart from a dead host; the
@@ -1082,10 +1118,16 @@ def _run_worker_impl(
                         {"status": "error", "error": run_dir_refusal},
                         ensure_ascii=False,
                     )
+                elif reused is not None:
+                    result = reused_result(reused)
+                elif budget_blocked:
+                    result = json.dumps({"status": "error", "error_code": "research_retry_limit",
+                                         "attempts": 2, "skipped": True,
+                                         "message": "This exact query failed twice in this team run. Disclose the gap or use a different source/scope; do not repeat it."})
                 else:
                     result = registry.execute(tc.name, args)
             result_is_error = _is_error_result(result)
-            if research_ledger is not None:
+            if research_ledger is not None and reused is None and not budget_blocked:
                 research_ledger.ingest_tool_result(
                     tool_name=tc.name, arguments=args, result=result,
                     call_id=tc.id, success=not result_is_error,
@@ -1097,8 +1139,13 @@ def _run_worker_impl(
                 if receipt is not None:
                     receipt.update({"agent_id": agent_id, "task_id": task_id})
                     local_receipts = merge_receipts(local_receipts, [receipt])
+                if query_budget is not None and run_dir_refusal is None:
+                    query_budget.record({"tool": tc.name, "arguments": args, "result": result,
+                                         "call_id": tc.id, "success": not result_is_error})
             if tc.name != "load_skill" and not result_is_error:
                 data_tool_calls += 1
+                if reused is None and not budget_blocked:
+                    query_round_progress = True
             tc_elapsed = time.monotonic() - tc_start
             _emit(
                 event_callback,
@@ -1112,6 +1159,9 @@ def _run_worker_impl(
                     "status": "error" if result_is_error else "ok",
                     "iteration": iteration,
                     "result_preview": _preview_tool_result(result),
+                    "cached": reused is not None,
+                    "retry_exhausted": budget_blocked,
+                    "original_call_id": reused["call_id"] if reused else None,
                     **mcp_meta,
                 },
             )
@@ -1120,6 +1170,9 @@ def _run_worker_impl(
                     tc.id, tc.name, truncate_tool_result(result)
                 )
             )
+
+        if query_budget is not None:
+            research_stall_rounds = 0 if query_round_progress else research_stall_rounds + 1
 
     # Content filter ratio tracking
     content_filter_warnings = compute_content_filter_warnings(
@@ -1141,6 +1194,8 @@ def _run_worker_impl(
               {"iterations": max_iterations, "reason": f"iteration limit; {reason}"})
         return WorkerResult(
             status="incomplete",
+            research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+            research_receipts=local_receipts,
             summary=summary,
             artifact_paths=_collect_artifacts(run_dir, artifact_dir),
             iterations=max_iterations,

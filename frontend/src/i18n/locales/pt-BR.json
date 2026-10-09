@@ -1058,6 +1058,10 @@
       "steps": "Etapas {{count}}",
       "continue": "Continuar",
       "reattach": "Anexe novamente",
+      "reusedData": "Dados existentes reutilizados",
+      "retryLimit": "Limite de tentativas atingido; consulta interrompida",
+      "waitingForAnalysis": "Aguardando análise e resposta do modelo",
+      "waitingForSource": "Aguardando resultado da consulta",
       "checkingFigures": "Verificando os números desta resposta (rodada {{round}})…"
     },
     "resumeConnector": "Retomar conector",

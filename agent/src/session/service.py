@@ -655,6 +655,9 @@ class SessionService:
         if isinstance(elapsed_ms, (int, float)) and not isinstance(elapsed_ms, bool):
             match["elapsed_ms"] = max(0, int(elapsed_ms))
         match["preview"] = str(data.get("preview") or "")
+        for flag in ("cached", "retry_exhausted"):
+            if isinstance(data.get(flag), bool):
+                match[flag] = data[flag]
         if match["status"] == "ok" and isinstance(data.get("artifact"), dict):
             match["artifact"] = dict(data["artifact"])
         if call_id:

@@ -1053,6 +1053,10 @@
       "steps": "{{count}} ステップ",
       "continue": "続行",
       "reattach": "再接続",
+      "reusedData": "取得済みデータを再利用",
+      "retryLimit": "再試行の上限に達したため照会を停止",
+      "waitingForAnalysis": "モデルの分析と回答を待っています",
+      "waitingForSource": "照会結果を待っています",
       "checkingFigures": "回答内の数値を確認中（{{round}} 回目）…"
     },
     "resumeConnector": "コネクタを再開",
