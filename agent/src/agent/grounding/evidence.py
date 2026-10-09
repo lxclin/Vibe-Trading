@@ -15,6 +15,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from src.tools.public_financial_snapshot import public_financial_snapshot
+
 from src.agent.grounding.identity import (
     _CANONICAL_SYMBOL_RE,
     _infer_currency,
@@ -621,6 +623,7 @@ def _is_price_kind(record: EvidenceRecord) -> bool:
         or _price_field_for_path(record.field) is not None
         or _is_registered_price_indicator(record.tool, record.field)
         or _leaf_name(record.field) in _AMOUNT_FIELDS
+        or (record.tool == "read_url" and record.field == "web_financial.unit_nav")
     )
 
 
@@ -1125,6 +1128,22 @@ class _EvidenceMixin:
         call_id: str,
     ) -> None:
         """Flatten bounded numeric leaves from other market-sensitive tools."""
+        if tool_name == "read_url":
+            # Reparse the returned page, rather than trusting model-supplied
+            # metadata. A page cannot create a previously unresolved identity.
+            snapshot = public_financial_snapshot(str(payload.get("url") or ""), str(payload.get("content") or ""))
+            if snapshot and snapshot["symbol"] in (self._session_symbols | self.authorized_symbols):
+                for field in ("last_price", "unit_nav"):
+                    if field not in snapshot:
+                        continue
+                    self._evidence.append(EvidenceRecord(
+                        call_id=call_id, tool=tool_name, symbol=snapshot["symbol"], source=snapshot["source"],
+                        timestamp=snapshot["as_of"], field="web_financial." + field, value=snapshot[field],
+                        status="observed", currency="CNY", venue=_infer_venue(snapshot["symbol"]),
+                    ))
+            # The tool's metadata has been parsed above with its own identity;
+            # do not flatten it again into the request's symbol or no symbol.
+            payload = {key: value for key, value in payload.items() if key != "web_financial"}
         symbols = self._extract_symbol_arguments(arguments)
         symbol = symbols[0] if len(symbols) == 1 else None
         if symbol:

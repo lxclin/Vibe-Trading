@@ -50,6 +50,8 @@ _FIELDS = {
     "investment_income": ("INVEST_INCOME",),
     "fair_value_change": ("FAIRVALUE_CHANGE_INCOME",),
     "impairment": ("ASSET_IMPAIRMENT_INCOME",),
+    "gross_profit": ("MLR",),
+    "gross_margin_pct": ("XSMLL",),
 }
 
 
@@ -168,6 +170,50 @@ def _fact(record: Any) -> dict[str, Any]:
     }
 
 
+def _financial_consistency(facts: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Reconcile selected same-period facts without claiming source verification.
+
+    EPS uses weighted average shares whereas TOTAL_SHARE is a period-end
+    balance. A mismatch requests review; it does not establish a data error.
+    Consolidated equity is deliberately not compared with parent-company BPS.
+    """
+    checks = []
+    for key, fact in facts.items():
+        if fact.get("status") == "conflicting":
+            checks.append({"check": "conflicting_" + key, "status": "review_needed",
+                           "refs": fact["refs"], "reason": "Same-period inputs disagree; reconcile sources before using this fact."})
+
+    def inputs(*keys: str) -> list[Any] | None:
+        selected = [facts.get(key, {}) for key in keys]
+        if not all("value" in fact for fact in selected):
+            return None
+        currencies = {fact.get("currency") for fact in selected}
+        if len(currencies) != 1 or None in currencies or "" in currencies:
+            return None
+        return selected
+
+    gross = inputs("gross_profit", "revenue", "gross_margin_pct")
+    if gross and gross[1]["value"] > 0:
+        computed = gross[0]["value"] / gross[1]["value"] * 100
+        matches = abs(computed - gross[2]["value"]) <= 0.1
+        checks.append({"check": "gross_margin", "status": "arithmetic_consistent" if matches else "review_needed",
+                       "formula": "gross_profit / revenue * 100", "computed_pct": computed,
+                       "reported_pct": gross[2]["value"], "tolerance_percentage_points": 0.1,
+                       "refs": [fact["ref"] for fact in gross],
+                       "reason": "Arithmetic check only; verify units and revenue scope in the filing if inconsistent."})
+    shares = inputs("basic_eps", "total_shares", "parent_profit")
+    if shares and shares[1]["value"] > 0 and shares[2]["value"] != 0:
+        implied = shares[0]["value"] * shares[1]["value"]
+        difference = abs(implied - shares[2]["value"]) / abs(shares[2]["value"])
+        checks.append({"check": "eps_share_basis", "status": "review_needed" if difference > 0.05 else "no_material_difference_detected",
+                       "formula": "basic_eps * period_end_total_shares", "implied_profit": implied,
+                       "relative_difference": difference, "review_threshold": 0.05,
+                       "refs": [fact["ref"] for fact in shares],
+                       "reason": "EPS uses weighted-average shares; period-end shares may differ after issuance or other changes. "
+                                 "Check the share basis before calculating valuation; this is not proof of an error."})
+    return checks
+
+
 def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequence[Any]) -> dict[str, Any]:
     """Select same-period facts and expose missing work without fabricating it."""
     companies = sorted(symbol for symbol in symbols if is_mainland_company(symbol))
@@ -237,6 +283,11 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
             warnings.append("Positive parent profit accompanies negative operating cash flow; investigate working capital and consolidation scope.")
         sheets.append({
             "symbol": symbol, "report_date": period, "facts": facts,
+            "financial_consistency": {
+                "checks": _financial_consistency(facts),
+                "boundary": "Same-period arithmetic and share-basis review only; not independent source verification. "
+                            "Missing checks mean insufficient comparable inputs, not a clean bill of health.",
+            },
             "coverage": coverage, "missing_same_period_inputs": missing,
             "valuation_recovery_inputs": {
                 "latest_annual_eps": _fact(latest_annual) if latest_annual is not None else None,
@@ -278,6 +329,9 @@ def equity_research_guidance(chinese: bool) -> str:
         return (
             "[企业买入与比较研究流程] 先区分公司质量、相对排序和当前价格是否值得买；"
             "用户未给期限时说明采用未来6—12个月。比较问题逐个确认标的；基金只检查指数、净值、费用、折溢价和风险，不能索取基金公司的经营财报。"
+            "ETF同样可用get_a_share_valuation获取未复权报价，勿套公司PE/PB。read_url返回web_financial时，"
+            "净值或报价声明observed并引用精确call_id::web_financial.unit_nav/last_price；单位净值不是盘中IOPV，不能混用日期计算实时溢价。"
+            "未结构化的网页费用和历史收益须用cited并在数字所在行显示来源；read_url::content不是可校验数值字段。"
             "对公司复用已取报价和最新财报，缺字段时分别调用get_financial_statements的quarter/indicators、income、cashflow；"
             "只补需要的报表，同一失败请求不重复；报价工具已内置腾讯备用来源，仍失败时披露缺口，不把失败当看空。"
             "工作表中的unchecked是不曾查询，unavailable是查询未得到，observed_analysis_pending仅代表数据已取得，不能冒充分析完成。"
@@ -289,6 +343,7 @@ def equity_research_guidance(chinese: bool) -> str:
             "read_url返回pagination.next_offset时，可用offset翻到财务表或附注，不能把首段截断当作完整阅读。"
             "估值与价格一节应写已能计算的参考倍数、不可计算项及原因，再通过研报或同行/历史数据核对比较基准；"
             "供应商返回数据仅是证据输入，异常增速、利润率或股本关系应指出并核验，不能默认为可靠。"
+            "工作表financial_consistency中review_needed项须说明冲突或核验结果；EPS与期末股数不匹配可能源于加权平均股本，不能直接判定造假或数据错误。"
             "一、盈利质量：在同一报告期比较归母利润、扣非利润、经营现金流及资本开支；区分合并与归母口径。"
             "从公司/交易所原始报告和附注核对投资收益、公允价值损益、减值、处置、税率、少数股东及股本变动。"
             "不要只读摘要指标；扣非利润不等于正常化盈利，投资损益即使被公司列为经常性，也要单独分析。"
@@ -322,6 +377,8 @@ def equity_research_guidance(chinese: bool) -> str:
         "path to the exchange/company original PDF and financial tables or notes, then disclose failure without repeated reads. "
         "Use read_url offset with pagination.next_offset for later tables/notes in a long document; a first excerpt is not full coverage. "
         "Show available valuation calculations and unusable inputs separately; investigate anomalous margins, growth or share relationships. "
+        "Address financial_consistency review_needed items with reconciliation or an explicit limitation. EPS uses weighted-average shares, "
+        "so an EPS versus period-end-share mismatch is a basis review, not proof of bad data. Arithmetic consistency is not independent verification. "
         "The quote tool has a Tencent fallback. Do not repeat failed reads or turn an outage into a bearish verdict. "
         "Include Earnings quality and Valuation and price sections, however brief. Reconcile same-period parent/core profit, "
         "operating cash flow and capex. Check original filing notes for investments, fair-value changes, impairments, "

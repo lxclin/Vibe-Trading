@@ -573,6 +573,26 @@ class _PolicyMixin:
 
         def normalize_declaration(declaration: Declaration) -> Declaration:
             ref = normalize(declaration.ref)
+            # A derived ratio may cite several full tool fields. Expand each
+            # only by exact field, locked subject and date metadata, never by
+            # choosing whichever call has a matching numeric operand.
+            if declaration.role == "derived":
+                subjects = _scan_symbols(declaration.note)
+                if len(subjects) == 1:
+                    subject = next(iter(subjects))
+                    dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
+                    parts = re.split(r"([;,，；])", ref)
+                    for index in range(0, len(parts), 2):
+                        scope, separator, field = parts[index].strip().partition("::")
+                        if separator and scope in {"get_a_share_valuation", "get_financial_statements", "get_research_reports", "read_url"}:
+                            candidates = [record for record in self._evidence
+                                          if record.tool == scope and record.field == field
+                                          and record.symbol == subject and record.status == "observed"
+                                          and (not dates or (record.timestamp and record.timestamp[:10] in dates))]
+                            if len(candidates) == 1:
+                                record = candidates[0]
+                                parts[index] = f"{record.call_id}::{record.field}"
+                    ref = "".join(parts)
             # Rounding a returned observation is presentation, not a forecast
             # or arithmetic derivation. Repair this narrow role error only for
             # one explicitly referenced observation at the written precision.
@@ -872,9 +892,14 @@ class _PolicyMixin:
                 )
                 continue
             issues.extend(self._check_observed(figure, declaration, symbol, records))
-        # Raw quote tools use nested fields such as data.last_price. Include
-        # those quotes, while excluding calculator inputs from provenance.
-        market_records = self._comparable_price_records()
+        # The dedicated raw quote is nested. Keep provenance scoped to actual
+        # market feeds: indicators and calculator echoes are not quote providers.
+        market_records = self._price_records() + [
+            record for record in self._evidence
+            if ((record.tool == "get_a_share_valuation" and record.field == "data.last_price")
+                or (record.tool == "read_url" and record.field == "web_financial.last_price"))
+            and record.status == "observed" and record.value is not None
+        ]
         if checked_price and market_records:
             issues.extend(self._validate_price_provenance(content, market_records))
         return issues
@@ -2128,6 +2153,17 @@ class _PolicyMixin:
                 )
             ]
         result, _ = derivation
+        if figure.percent and declaration is not None:
+            evaluated = _formula_in_note(declaration.note)
+            node = evaluated[2].body if evaluated else None
+            # An explicit final *100 converts a fraction to percentage points.
+            # _result_matches expects a fraction, so do not scale it twice.
+            # Keep this structural: never accept both scales merely because
+            # one happens to match the reported value.
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+                if any(isinstance(operand, ast.Constant) and operand.value == 100
+                       for operand in (node.left, node.right)):
+                    result /= 100.0
         if self._result_matches(figure, result):
             return []
         # Reported in the figure's own units, as ``_result_matches`` compares it.

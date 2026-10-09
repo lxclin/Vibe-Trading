@@ -12,6 +12,7 @@ import requests
 from src.agent.progress import emit_progress
 from src.agent.tools import BaseTool
 from src.security.scanner import with_security_warnings
+from src.tools.public_financial_snapshot import public_financial_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,9 @@ def read_url(url: str, no_cache: bool = False, offset: int = 0, max_chars: int =
         }
         if _CACHED_MARKER in resp.text:
             result["cached"] = True
+        snapshot = public_financial_snapshot(target_url, text)
+        if snapshot:
+            result["web_financial"] = snapshot
         result = with_security_warnings(result, fields=("content",))
         return json.dumps(result, ensure_ascii=False)
 
@@ -157,6 +161,9 @@ class WebReaderTool(BaseTool):
     description = (
         "Fetch public web pages or reader-supported documents as Markdown. "
         "Long documents are paged: use pagination.next_offset to read later financial tables or notes. "
+        "Recognized Tencent quote and ChinaAMC ETF product pages also return web_financial "
+        "structured fields. Cite these as observed with call_id::web_financial.last_price or "
+        "call_id::web_financial.unit_nav. Daily unit_nav is not intraday IOPV. "
         "A successful page read does not mean the full filing was read."
     )
     parameters = {
