@@ -387,6 +387,73 @@ class _ReleaseMixin:
             )
         return self.correction_prompt(validation)
 
+    def verified_research_summary(self) -> str | None:
+        """Preserve observed equity facts when a synthesis cannot be released.
+
+        No rejected prose, predictions or investment ratings are copied. The
+        summary goes through the unchanged full validator. Identity conflicts
+        and still-invalid summaries retain the ordinary fail-closed fallback.
+        """
+        if (not getattr(self, "_equity_research_required", False)
+                or self.identity_status != "locked"):
+            return None
+        companies = self.equity_research_worksheet().get("companies", [])
+        if not companies:
+            return None
+        zh = self._user_writes_chinese()
+        lines = [
+            "结论：研究未完成；期限：未来持有期沿用用户指定，未指定时按六至十二个月分析；信心：低。"
+            if zh else "Verdict: research incomplete. Horizon: the requested period, or six to twelve months if unspecified. Confidence: low.",
+            "以下保留本轮工具可核对的事实；完整分析未能通过核验，不能将此理解为看空或等待买入建议。"
+            if zh else "These are retained tool-backed facts. The full synthesis could not be verified; this is not a bearish or wait recommendation.",
+            "主要依据：" if zh else "Key evidence:",
+        ]
+        declarations = []
+        labels = {"parent_profit": ("归母净利润", "Parent profit"),
+                  "core_parent_profit": ("扣非归母净利润", "Deducted parent profit"),
+                  "operating_cash_flow": ("经营现金流", "Operating cash flow"),
+                  "capex_cash_paid": ("购建长期资产现金支出", "Disclosed capital spending")}
+        for company in companies:
+            symbol = company["symbol"]
+            fields = company.get("valuation_snapshot", {}).get("fields", {})
+            price = fields.get("last_price", {})
+            if not price.get("ref"):
+                continue
+            gaps = company.get("coverage", {}).get("entry_evidence", {}).get("gaps", [])
+            if gaps:
+                names = {"raw_quote": "原始报价", "valuation_multiple": "PE/PB估值依据",
+                         "profitability": "归母利润", "operating_cash_flow": "经营现金流",
+                         "matching_financial_periods": "同期财报口径"}
+                lines.append(f"{symbol} " + ("未取得、已过时或尚未匹配的输入：" if zh else "Missing, stale or mismatched inputs: ")
+                             + ", ".join(names.get(gap, gap) if zh else gap for gap in gaps))
+            observed = [("未复权报价" if zh else "Raw quote", price)]
+            observed.extend((label[0 if zh else 1], company["facts"][key]) for key, label in labels.items()
+                            if company.get("facts", {}).get(key, {}).get("ref"))
+            for label, fact in observed:
+                value = fact.get("value")
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    continue
+                written = format(value, ".15g")
+                currency = fact.get("currency") or ""
+                lines.append(f"- {symbol} {label}: {currency} {written}; {fact.get('as_of') or 'unknown date'}; "
+                             f"source: {fact.get('source') or 'unknown'}; {fact['ref']}")
+                declarations.append(f"{written} | observed | {symbol} {label} | {fact['ref']}")
+        if not declarations:
+            return None
+        lines.extend([
+            "公司质量：保留上列财报事实，盈利可持续性尚未形成可发布判断。"
+            if zh else "Company quality: financial facts retained above; sustainable earnings remain unassessed.",
+            "价格吸引力：尚未完成可核验的同口径历史或同行估值比较。"
+            if zh else "Price attractiveness: no verified like-for-like historical or peer comparison completed.",
+            "方向倾向：未形成可发布的方向判断。当前行动：研究未完成。"
+            if zh else "Directional view: no verified directional judgment. Current action: research incomplete.",
+            "改变判断的条件：核验可持续盈利，并将同期报价与同口径历史或同行估值基准比较后重新评估。"
+            if zh else "What changes the view: verify sustainable earnings and compare the dated quote against like-for-like historical or peer valuations.",
+        ])
+        draft = "\n\n".join(lines) + "\n\n```figures\n" + "\n".join(declarations) + "\n```"
+        check = self.revalidate(draft)
+        return check.released_text if check.valid else None
+
     def safe_fallback(self) -> str:
         """Return a deterministic fail-closed answer after repeated rejection."""
         is_zh = self._user_writes_chinese()
@@ -606,6 +673,42 @@ class _ReleaseMixin:
         if is_zh:
             return "数据说明：" + "；".join(parts) + "。"
         return "Data note: " + "; ".join(parts) + "."
+
+    def repair_references(self, content: str, validation: ValidationResult) -> str | None:
+        """Repair an unambiguous tool-name reference, never values or field paths.
+
+        Unknown aliases, wrong calls, multiple candidates and derived formulas
+        stay with the model correction path. Recheck the entire answer before
+        returning; this cannot approve an unrelated bad claim.
+        """
+        replacements: dict[str, str] = {}
+        for issue in validation.issues:
+            if issue.get("reason") != "field_ref_needs_call_id":
+                continue
+            candidates = list(dict.fromkeys(issue.get("field_ref_candidates") or []))
+            old_refs = issue.get("source_tool_call_ids") or []
+            if len(candidates) != 1 or len(old_refs) != 1:
+                continue
+            old, new = old_refs[0], candidates[0]
+            if not isinstance(old, str) or not isinstance(new, str) or "::" not in old or "::" not in new:
+                continue
+            if old.split("::", 1)[1] != new.split("::", 1)[1]:
+                continue
+            replacements[old] = new
+        block = parse_figures_block(content)
+        if not replacements or block.malformed:
+            return None
+        text = content
+        for start, end in reversed(block.spans):
+            fragment = text[start:end]
+            for old, new in replacements.items():
+                # Change only the final declaration column, never prose or notes.
+                fragment = re.sub(r"(?m)([|｜]\s*)" + re.escape(old) + r"(\s*(?:[|｜]\s*)?$)",
+                                  lambda match: match.group(1) + new + match.group(2), fragment)
+            text = text[:start] + fragment + text[end:]
+        if text == content or not self.revalidate(text).valid:
+            return None
+        return text
 
     def repair_provenance(
         self,

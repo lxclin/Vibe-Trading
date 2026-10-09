@@ -12,6 +12,7 @@ from datetime import date, datetime
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+from src.agent.grounding.analysis import multiple_comparisons, valuation_workbench
 from src.agent.grounding.decision import decision_coverage
 from src.agent.grounding.research_plan import company_research_plan
 
@@ -325,6 +326,8 @@ def equity_worksheet(
                 "boundary": "One timestamped raw-quote call only. Provider PE/PB are observed ratios, "
                             "not verified fair value. Do not fill missing fields from another snapshot.",
             },
+            "analysis_workbench": valuation_workbench(facts, quote_fields, sector,
+                                                      multiple_comparisons(records, symbol, symbols, quote_fields)),
             "valuation_recovery_inputs": {
                 "latest_annual_eps": _fact(latest_annual) if latest_annual is not None else None,
                 "current_bps": facts.get("book_value_per_share"),
@@ -397,6 +400,9 @@ def equity_research_guidance(chinese: bool) -> str:
             "用financial_rigor的calc核算：情景每股价值=相应年度EPS×有依据的PE；上涨/下跌空间=情景价值÷未复权现价−1；"
             "安全边际=1−现价÷基准估值。它们分母不同，不要混称。亏损企业不采用PE；使用其他适合的方法。"
             "计算正确不代表假设可靠；没有合理假设就说明无法量化，仍给出已有证据支持的相对排序，不编目标价或胜率。"
+            "analysis_workbench提供同报告期差额计算、估值比较列和可持续盈利桥，使用其公式及原始输入引用，不把派生值冒充工具观测。"
+            "估值比较按指标、当前值、基准值、双方日期、TTM/前瞻口径、业务周期差异、结论逐项呈现；缺项写未核实，不用低PE替代比较。"
+            "最终明确分别标注公司质量、价格吸引力、方向倾向、当前行动；每项独立说明依据、信心与缺口。缺估值可保留公司质量判断，但价格未评估不等于价格贵。"
             "三、回答：保留‘盈利质量’和‘估值与价格’两节，可简短。第一段说明是初筛排序、条件性偏好，还是已论证当前买入；"
             "若团队已完成研究或刚完成补查，最终回答必须独立完整，整合原结论与新增证据，不能只写‘已补读’或‘结论不变’。"
             "valuation_snapshot保留同次原始报价的价格、PE/PB及精确引用；已取得的倍数须解释其口径和意义，不能因旧工具正文压缩而当作缺失。"
@@ -437,6 +443,9 @@ def equity_research_guidance(chinese: bool) -> str:
         "operating cash flow and capex. Check original filing notes for investments, fair-value changes, impairments, "
         "disposals, tax, minority interests and share changes. Core profit is not normalized earnings. Adjust peers "
         "symmetrically using after-tax parent-attributable effects, sourced inputs and formulas; unknown tax/scope is a gap. "
+        "Use analysis_workbench for sourced arithmetic, a dated like-for-like valuation comparison and the sustainable earnings bridge. "
+        "Explicitly label Company quality, Price attractiveness, Directional view and Current action, with independent evidence, confidence and gaps. "
+        "Missing valuation does not erase supported company findings or prove overvaluation. "
         "For cyclicals analyze commodity prices, volume, costs, capex and projects. Use comparable historical/peer valuation "
         "and explicit sustainable-earnings assumptions; never normalize by simply doubling interim EPS. TTM needs "
         "prior annual + current cumulative - prior comparable cumulative, with compatible accounts and shares. "

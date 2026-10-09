@@ -30,6 +30,7 @@ from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
 from src.agent.grounding.decision import decision_guidance
 from src.agent.grounding.equity_research import equity_research_guidance
+from src.agent.grounding.analysis import delivery_review
 from src.agent.grounding.release import MAX_GROUNDING_REVISIONS
 from src.agent.memory import WorkspaceMemory
 from src.agent.progress import HeartbeatTimer, ProgressEvent, _set_emitter
@@ -1359,6 +1360,7 @@ class AgentLoop:
         empty_model_response_iter: int | None = None
         consecutive_empty_responses = 0
         grounding_revisions = 0
+        research_delivery_reviewed = False
         # A normal grounding correction is a text revision, not a new research
         # turn. Explicit grounding recovery (identity / missing price evidence)
         # keeps tools available; ordinary correction turns do not.
@@ -1935,6 +1937,26 @@ class AgentLoop:
                             {"delta": final_content, "iter": current_iter},
                         )
                         syntax_fallback_emitted = True
+                    if (self._grounding is not None
+                            and getattr(self._grounding, "_equity_research_required", False)
+                            and not research_delivery_reviewed and not forced_grounding_release
+                            and iteration + 1 < self.max_iterations
+                            and self._grounding.equity_research_worksheet().get("companies")):
+                        research_delivery_reviewed = True
+                        requests = delivery_review(final_content)
+                        if requests:
+                            if not buffer_text_output and streamed_chars:
+                                self._emit("stream_reset", {"iter": current_iter, "reason": "research_delivery_review"})
+                            trace.write({"type": "research_delivery_review", "iter": current_iter, "requests": requests})
+                            messages.append({"role": "assistant", "content": final_content})
+                            messages.append({"role": "system", "content":
+                                "[RESEARCH DELIVERY REVIEW] Revise this complete answer once using existing evidence only. "
+                                "Preserve supported findings, exact citations and the figures block; do not restart retrieval. "
+                                "Do not fabricate missing inputs or upgrade confidence to satisfy the format. "
+                                + " ".join(requests)})
+                            grounding_correction_text_only = True
+                            final_content = ""
+                            continue
                     if self._grounding is not None:
                         validation = (
                             self._grounding.revalidate(final_content)
@@ -1942,12 +1964,12 @@ class AgentLoop:
                             else self._grounding.validate_final_answer(final_content)
                         )
                         if not validation.valid:
-                            # A draft whose only defect is a missing provenance
-                            # word (source / currency / symbol suffix) gets the
-                            # word appended, not another multi-minute model round.
-                            repaired = self._grounding.repair_provenance(
-                                final_content, validation
-                            )
+                            # Repair unique exact-field citations or provenance
+                            # metadata without changing numeric claims. Every
+                            # repaired answer still passes the complete gate.
+                            repaired = self._grounding.repair_references(final_content, validation)
+                            if repaired is None:
+                                repaired = self._grounding.repair_provenance(final_content, validation)
                             if repaired is not None:
                                 # Non-recording: no model round produced this
                                 # text, and ``validation_count`` is the
@@ -2103,15 +2125,18 @@ class AgentLoop:
                                     f"redacted after {rejected_drafts} rejected drafts"
                                 )
                             else:
-                                final_content = self._grounding.safe_fallback()
+                                evidence_summary = self._grounding.verified_research_summary()
+                                final_content = evidence_summary or self._grounding.safe_fallback()
+                                if evidence_summary:
+                                    trace.write({"type": "answer_released_evidence_summary", "iter": current_iter})
                                 # Captured HERE, beside the redacted branch's
                                 # own count. Left unset, the reason was built
                                 # lazily at the end of the run from a
                                 # ``validation_count`` the release path's
                                 # rechecks had already moved.
                                 self._released_fallback_reason = (
-                                    "final answer degraded to the deterministic "
-                                    f"fallback after {rejected_drafts} rejected "
+                                    ("verified evidence summary after " if evidence_summary else "final answer degraded to the deterministic fallback after ")
+                                    + f"{rejected_drafts} rejected "
                                     "drafts could not be corrected within the "
                                     "iteration budget"
                                 )
