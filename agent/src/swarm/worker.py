@@ -635,7 +635,7 @@ def _run_worker_impl(
     skill_desc = _filter_skill_descriptions(skills_loader, agent_spec.skills)
     system_prompt = build_worker_prompt(
         agent_spec, upstream_summaries, skill_desc, grounding_block=grounding_block,
-        available_tools=registry.tool_names,
+        available_tools=[definition["function"]["name"] for definition in registry.get_definitions()],
     )
 
     # 4. Resolve prompt template with user vars (missing vars → LLM infers)

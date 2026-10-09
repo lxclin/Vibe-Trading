@@ -220,7 +220,9 @@ def test_format_renders_table_and_range() -> None:
     ]
     block = grounding.format_grounding_block({"NVDA.US": rows})
 
-    assert "Ground Truth" in block
+    assert "Market Data Snapshot" in block
+    assert "not authoritative current or executable prices" in block
+    assert "not a confirmed final session close" in block
     assert "NVDA.US" in block
     assert "215.20" in block            # last close
     assert "207.80 – 215.20" in block   # window range (min/max close)

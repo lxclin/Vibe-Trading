@@ -100,7 +100,7 @@ def decision_coverage(
         if record.tool == "get_a_share_valuation" and record.symbol == symbol
         and record.status == "observed"
     ]
-    quote = max((record for record in quotes if record.field == "data.last_price"
+    quote = max((record for record in reversed(quotes) if record.field == "data.last_price"
                  and isinstance(record.value, (int, float)) and record.value > 0),
                 key=lambda record: record.timestamp or "", default=None)
     multiple = next((record for record in reversed(quotes) if record.field in {"data.pe_ttm", "data.pb"}

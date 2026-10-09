@@ -88,11 +88,21 @@ def company_research_plan(
     subject = symbol + (" " + names[0][:60] if names else "")
     period = report_date[:4] if report_date else "最新"
     quote_year = str(coverage["raw_quote"].get("as_of") or period)[:4]
+    # Use resolved company names only to choose retrieval terms, never to infer
+    # financial facts or a valuation conclusion.
+    name_text = " ".join(names)
+    focus = sector
+    if sector == "industrial":
+        focus = ("semiconductor" if re.search(r"半导体|存储|芯片|长鑫|中芯", name_text)
+                 else "resources" if re.search(r"矿业|黄金|铜业|铝业|煤业|煤炭", name_text)
+                 else "industrial")
     drivers = {
         "bank": "净息差 不良贷款 拨备 非息收入",
         "insurance": "保险服务利润 新业务价值 投资收益 偿付能力",
         "financial": "经常性收入 投资收益 风险成本 资本充足",
-    }.get(sector, "盈利驱动 产量 单位成本 资本开支")
+        "semiconductor": "产品价格 需求 库存 产能利用率 研发 折旧 资本开支",
+        "resources": "金属或能源价格 产量 单位成本 储量 项目投产 资本开支",
+    }.get(focus, "收入结构 量价变化 毛利率 成本 一次性损益 资本开支")
     queries = {
         "valuation_benchmark": f"{subject} {quote_year} 历史估值分位 同业可比 市盈率 市净率 统计日期",
         "earnings_drivers": f"{subject} {period} 财报 可持续盈利 一次性损益 {drivers}",
@@ -127,7 +137,7 @@ def company_research_plan(
                 "www.sse.com.cn", "www.szse.cn", "static.cninfo.com.cn", "www.cninfo.com.cn",
             })
             actions.append({"topic": topic, "tool": "read_url", "arguments": {"url": preferred[0]}})
-    return {"prerequisites_ready": ready, "topics": topics, "priority_actions": actions[:2],
+    return {"prerequisites_ready": ready, "driver_search_focus": focus, "topics": topics, "priority_actions": actions[:2],
             "stop_rule": "Recommend one scoped search and one candidate read per topic; paginate that document only if needed. "
                          "A failed read is a disclosed gap, "
                          "not an instruction to retry. No extra final-answer rejection is created by this plan.",

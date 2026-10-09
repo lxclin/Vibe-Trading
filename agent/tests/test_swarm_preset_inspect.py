@@ -21,6 +21,9 @@ def test_inspect_preset_returns_dry_run_layers() -> None:
     assert report["valid"]
     assert report["variables"] == ["market", "target"]
     assert report["layers"][0] == [
+        {"task_id": "task-evidence", "agent_id": "evidence_researcher"},
+    ]
+    assert report["layers"][1] == [
         {"task_id": "task-bull", "agent_id": "bull_advocate"},
         {"task_id": "task-bear", "agent_id": "bear_advocate"},
     ]
