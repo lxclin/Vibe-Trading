@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import date, datetime
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from src.agent.grounding.decision import decision_coverage
@@ -26,6 +26,17 @@ _ENTRY_RE = re.compile(
     r"\b(?:buy|worth buying|better investment)\b",
     re.IGNORECASE,
 )
+_COMPANY_FOLLOWUP_RE = re.compile(
+    r"^.{2,60}?(?:怎么样|如何|怎么看|值得关注吗)[？?。\s]*$|^what about .{2,60}[?\s]*$",
+    re.IGNORECASE,
+)
+_NON_COMPANY_FOLLOWUP_RE = re.compile(
+    r"回答|报告|结果|输出|提示|方案|方法|页面|天气|身体|不要分析投资|不谈投资|"
+    r"公司简介|公司介绍|主营业务|官网|\b(?:answer|report|website)\b", re.IGNORECASE,
+)
+_FINANCIAL_SECTOR_FIELDS = frozenset({
+    "NONPERLOAN", "NET_INTEREST_MARGIN", "EARNED_PREMIUM", "NET_ROI", "NBV_LIFE",
+})
 _FIELDS = {
     "parent_profit": ("PARENTNETPROFIT", "PARENT_NETPROFIT"),
     "core_parent_profit": ("KCFJCXSYJLR",),
@@ -33,10 +44,94 @@ _FIELDS = {
     "operating_cash_flow": ("NETCASH_OPERATE", "NETCASH_OPERATE_PK"),
     "capex_cash_paid": ("CONSTRUCT_LONG_ASSET",),
     "basic_eps": ("EPSJB",),
+    "book_value_per_share": ("BPS", "PER_NETASSET"),
+    "total_shares": ("TOTAL_SHARE",),
+    "total_equity": ("TOTAL_EQUITY_PK",),
     "investment_income": ("INVEST_INCOME",),
     "fair_value_change": ("FAIRVALUE_CHANGE_INCOME",),
     "impairment": ("ASSET_IMPAIRMENT_INCOME",),
 }
+
+
+def contextual_equity_research_question(
+    question: str, history: Sequence[Mapping[str, Any]] | None,
+) -> str:
+    """Carry an investment objective into a short company-evaluation follow-up.
+
+    Only user requests supply intent. This does not carry a previous company's
+    identity to a new subject, or treat every factual company question as a buy
+    question. The ordinary resolver must still identify the new company.
+    """
+    if (is_equity_entry_research(question) or _META_RE.search(question)
+            or _NON_COMPANY_FOLLOWUP_RE.search(question)
+            or not _COMPANY_FOLLOWUP_RE.fullmatch(question.strip())):
+        return question
+    horizon = None
+    for message in reversed(list(history or [])[-24:]):
+        if message.get("role") != "user":
+            continue
+        text = str(message.get("content") or "").strip()
+        if re.search(r"不谈投资|不要分析投资|只介绍公司|只看业务", text):
+            return question
+        if horizon is None and re.fullmatch(r"(?:持有|期限[:：]?)?\s*(?:半年|一年|长期|短线|\d+个月)[。\s]*", text):
+            horizon = text[:40]
+        if is_equity_entry_research(text):
+            return (question + "\n[用户此前明确的投资研究需求] " + text[:240]
+                    + (f"；持有期限：{horizon}" if horizon else ""))
+    return question
+
+
+def _statement_attempted(attempts: Sequence[Any], symbol: str, statement: str, period: str | None = None) -> bool:
+    return any(isinstance(attempt, dict) and attempt.get("symbol") == symbol
+               and attempt.get("tool") == "get_financial_statements"
+               and attempt.get("statement") == statement
+               and (period is None or attempt.get("period") == period) for attempt in attempts)
+
+
+def _supplementary_tasks(records: Sequence[Any], symbol: str, attempts: Sequence[Any]) -> list[dict[str, Any]]:
+    """Offer each missing statement once; query success never implies analysis."""
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    financials = []
+    for record in records:
+        if record.symbol != symbol or record.tool != "get_financial_statements" or not _observed(record):
+            continue
+        try:
+            stamp = date.fromisoformat(str(record.timestamp)[:10])
+        except ValueError:
+            continue
+        if stamp <= today:
+            financials.append(record)
+    profit_dates = [str(record.timestamp)[:10] for record in financials
+                    if record.field.rsplit(".", 1)[-1].upper() in _FIELDS["parent_profit"]]
+    latest = max(profit_dates) if profit_dates else None
+    current = [record for record in financials if str(record.timestamp)[:10] == latest]
+    fields = {record.field.rsplit(".", 1)[-1].upper() for record in current}
+    tasks = []
+    if (latest and not fields.intersection(_FINANCIAL_SECTOR_FIELDS)
+            and not fields.intersection(_FIELDS["capex_cash_paid"])
+            and not _statement_attempted(attempts, symbol, "cashflow")
+            and not any(record.statement == "cashflow" for record in current)):
+        tasks.append({
+            "code": "decision_capex_not_checked", "statement": "cashflow", "period": "quarter",
+            "reason": "Operating cash flow alone does not cover capex. Retrieve the cash-flow statement "
+                      "once for same-period cash paid for long-lived assets; retain a gap if unavailable.",
+        })
+    coverage = decision_coverage(records, symbol, attempts)
+    annual_eps = any(record.field.rsplit(".", 1)[-1].upper() == "EPSJB"
+                     and getattr(record, "report_period", None) == "annual" and record.value > 0
+                     and (today - date.fromisoformat(str(record.timestamp)[:10])).days <= 550 for record in financials)
+    if (coverage["valuation_multiple"]["status"] == "unavailable"
+            and any(record.field.rsplit(".", 1)[-1].upper() == "EPSJB" and record.value > 0 for record in current)
+            and not annual_eps and not _statement_attempted(attempts, symbol, "indicators", "annual")):
+        tasks.append({
+            "code": "decision_valuation_basis_not_checked", "statement": "indicators", "period": "annual",
+            "reason": "Provider multiples are unavailable. Retrieve annual indicators once to examine an "
+                      "alternative earnings basis, alongside current BPS and share changes. A pre-IPO or "
+                      "stale EPS may be unusable; disclose that instead of annualizing interim EPS.",
+        })
+    return [{**task, "tool": "get_financial_statements", "arguments": {
+        "code": symbol, "statement": task["statement"], "period": task["period"],
+    }} for task in tasks]
 
 
 def is_equity_entry_research(question: str) -> bool:
@@ -123,6 +218,9 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
             and attempt.get("statement") == "income" for attempt in attempts
         )
         income_observed = any(record.statement == "income" for record in financials)
+        annual_eps = [record for record in financials if getattr(record, "report_period", None) == "annual"
+                      and record.field.rsplit(".", 1)[-1].upper() == "EPSJB"]
+        latest_annual = max(annual_eps, key=lambda record: record.timestamp) if annual_eps else None
         missing = [key for key in ("parent_profit", "core_parent_profit", "operating_cash_flow")
                    if key not in facts or "value" not in facts[key]]
         warnings = [
@@ -140,12 +238,23 @@ def equity_worksheet(records: Sequence[Any], symbols: set[str], attempts: Sequen
         sheets.append({
             "symbol": symbol, "report_date": period, "facts": facts,
             "coverage": coverage, "missing_same_period_inputs": missing,
+            "valuation_recovery_inputs": {
+                "latest_annual_eps": _fact(latest_annual) if latest_annual is not None else None,
+                "current_bps": facts.get("book_value_per_share"),
+                "current_total_shares": facts.get("total_shares"),
+                "boundary": "Candidate calculation inputs only. Confirm share basis, reporting scope and "
+                            "quote adjustment before using them. Annual EPS is historical, not normalized or TTM.",
+            },
+            "next_statement_reads": _supplementary_tasks(records, symbol, attempts),
             "research_progress": {
                 "quote": coverage["raw_quote"]["status"],
                 "provider_multiples": coverage["valuation_multiple"]["status"],
                 "financial_inputs": "incomplete" if missing else "observed_analysis_pending",
                 "income_statement": "observed_analysis_pending" if income_observed else (
                     "unavailable" if income_attempted else "unchecked"
+                ),
+                "capex": "observed_analysis_pending" if "capex_cash_paid" in facts else (
+                    "unavailable" if _statement_attempted(attempts, symbol, "cashflow") else "unchecked"
                 ),
                 "original_filing_notes": "not_verified_by_worksheet",
                 "industry_drivers": "not_verified_by_worksheet",
@@ -172,6 +281,14 @@ def equity_research_guidance(chinese: bool) -> str:
             "对公司复用已取报价和最新财报，缺字段时分别调用get_financial_statements的quarter/indicators、income、cashflow；"
             "只补需要的报表，同一失败请求不重复；报价工具已内置腾讯备用来源，仍失败时披露缺口，不把失败当看空。"
             "工作表中的unchecked是不曾查询，unavailable是查询未得到，observed_analysis_pending仅代表数据已取得，不能冒充分析完成。"
+            "工作表列出next_statement_reads时，先执行尚未尝试的补查再写最终报告，不能只把可查问题列成未来清单。"
+            "若行情源缺PE/PB，继续核对工作表中的BPS、全年EPS和股本变动，口径一致时用financial_rigor计算参考PB或历史PE，"
+            "标明报价日与报期；新上市、拆股、增发前的每股数据尤其要核对分母。无法对齐时说明具体冲突，不能机械换算。"
+            "读取公告网页只有释义、摘要或页面附带行情时，不能称为已读完整财报；继续定位交易所/公司原始PDF及财务表或附注，"
+            "至少尝试一次替代路径，失败后列缺口，不反复抓同页。若首次来源本已是完整原始报告则直接复用。"
+            "read_url返回pagination.next_offset时，可用offset翻到财务表或附注，不能把首段截断当作完整阅读。"
+            "估值与价格一节应写已能计算的参考倍数、不可计算项及原因，再通过研报或同行/历史数据核对比较基准；"
+            "供应商返回数据仅是证据输入，异常增速、利润率或股本关系应指出并核验，不能默认为可靠。"
             "一、盈利质量：在同一报告期比较归母利润、扣非利润、经营现金流及资本开支；区分合并与归母口径。"
             "从公司/交易所原始报告和附注核对投资收益、公允价值损益、减值、处置、税率、少数股东及股本变动。"
             "不要只读摘要指标；扣非利润不等于正常化盈利，投资损益即使被公司列为经常性，也要单独分析。"
@@ -198,6 +315,13 @@ def equity_research_guidance(chinese: bool) -> str:
         "Use one stated horizon (default 6-12 months). Treat funds by NAV, fees, tracking and premium, not issuer accounts. "
         "Reuse quotes and financials; retrieve missing quarterly indicators/income/cashflow only as needed. "
         "Unchecked means not queried; unavailable means attempted without usable evidence. Observed inputs still require analysis. "
+        "Execute unattempted next_statement_reads before finalizing, instead of turning retrievable gaps into a generic checklist. "
+        "When provider PE/PB is missing, examine BPS, annual EPS and share changes; use financial_rigor for a provisional "
+        "historical PE or PB only with compatible share and price bases. Pre-IPO EPS is not automatically comparable. "
+        "A filing page containing only a glossary, preview or quote sidebar is not a full filing. Try one alternative "
+        "path to the exchange/company original PDF and financial tables or notes, then disclose failure without repeated reads. "
+        "Use read_url offset with pagination.next_offset for later tables/notes in a long document; a first excerpt is not full coverage. "
+        "Show available valuation calculations and unusable inputs separately; investigate anomalous margins, growth or share relationships. "
         "The quote tool has a Tencent fallback. Do not repeat failed reads or turn an outage into a bearish verdict. "
         "Include Earnings quality and Valuation and price sections, however brief. Reconcile same-period parent/core profit, "
         "operating cash flow and capex. Check original filing notes for investments, fair-value changes, impairments, "
@@ -233,6 +357,14 @@ def equity_research_input_issues(
         if not is_mainland_company(symbol):
             continue
         coverage = decision_coverage(records, symbol, attempts)
+        for task in _supplementary_tasks(records, symbol, attempts):
+            args = task["arguments"]
+            issues.append({
+                "code": task["code"], "value": None, "role": None, "span": None,
+                "symbol": symbol, "reason": task["code"],
+                "message": f'Check get_financial_statements(code="{symbol}", statement="{args["statement"]}", '
+                           f'period="{args["period"]}") before finalizing. ' + task["reason"],
+            })
         required = (
             ("raw_quote", "decision_raw_valuation_not_checked",
              f'get_a_share_valuation(code="{symbol}")'),
@@ -269,10 +401,18 @@ def equity_research_input_issues(
 
 def equity_entry_answer_issues(
     content: str, records: Sequence[Any], symbols: set[str], attempts: Sequence[Any],
+    verified_valuation_symbols: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Do not let missing essential inputs masquerade as a market verdict."""
-    gaps = [symbol for symbol in sorted(symbols) if is_mainland_company(symbol)
-            and decision_coverage(records, symbol, attempts)["entry_evidence"]["status"] == "incomplete"]
+    gaps = []
+    for symbol in sorted(symbols):
+        if not is_mainland_company(symbol):
+            continue
+        missing = decision_coverage(records, symbol, attempts)["entry_evidence"]["gaps"]
+        if symbol in (verified_valuation_symbols or set()):
+            missing = [slot for slot in missing if slot != "valuation_multiple"]
+        if missing:
+            gaps.append(symbol)
     if not gaps or re.search(r"研究未完成|暂无法评价|research incomplete|cannot yet assess", content, re.IGNORECASE):
         return []
     return [{

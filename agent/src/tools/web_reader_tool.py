@@ -58,7 +58,7 @@ def _url_allowed(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def read_url(url: str, no_cache: bool = False) -> str:
+def read_url(url: str, no_cache: bool = False, offset: int = 0, max_chars: int = _MAX_LENGTH) -> str:
     """Fetch web page content via the Jina Reader API.
 
     The full URL (including query string) is sent to the third-party Jina
@@ -68,12 +68,18 @@ def read_url(url: str, no_cache: bool = False) -> str:
     Args:
         url: Target URL.
         no_cache: When true, ask the reader for a fresh (uncached) fetch.
+        offset: Character offset for a later section of a long document.
+        max_chars: Bounded page size, from 1 to 8000 characters.
 
     Returns:
         JSON result with title, content, url; ``cached: true`` is added
         when the reader served a stale snapshot.
     """
     target_url = url.strip()
+    if (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0
+            or isinstance(max_chars, bool) or not isinstance(max_chars, int)
+            or not 1 <= max_chars <= _MAX_LENGTH):
+        return json.dumps({"status": "error", "error": "offset must be a nonnegative integer; max_chars must be 1..8000"})
     allowed, error = _url_allowed(target_url)
     if not allowed:
         return json.dumps({"status": "error", "error": error}, ensure_ascii=False)
@@ -106,8 +112,16 @@ def read_url(url: str, no_cache: bool = False) -> str:
                 title = line[6:].strip()
                 break
 
-        if len(text) > _MAX_LENGTH:
-            text = text[:_MAX_LENGTH] + f"\n\n... (truncated, total {len(resp.text)} chars)"
+        total_length = len(text)
+        if offset > total_length:
+            return json.dumps({
+                "status": "error", "error": "offset exceeds document length",
+                "length": total_length,
+            }, ensure_ascii=False)
+        end = min(offset + max_chars, total_length)
+        text = text[offset:end]
+        if end < total_length:
+            text += f"\n\n... (truncated, total {total_length} chars; next offset {end})"
 
         result = {
             "status": "ok",
@@ -115,6 +129,11 @@ def read_url(url: str, no_cache: bool = False) -> str:
             "url": target_url,
             "content": text,
             "length": len(resp.text),
+            "pagination": {
+                "offset": offset, "returned": end - offset,
+                "next_offset": end if end < total_length else None,
+                "complete": end == total_length,
+            },
         }
         if _CACHED_MARKER in resp.text:
             result["cached"] = True
@@ -135,11 +154,19 @@ class WebReaderTool(BaseTool):
     """Web reader tool."""
 
     name = "read_url"
-    description = "Fetch web page content: provide a URL and receive the page as Markdown text. Useful for reading docs, articles, API references, etc."
+    description = (
+        "Fetch public web pages or reader-supported documents as Markdown. "
+        "Long documents are paged: use pagination.next_offset to read later financial tables or notes. "
+        "A successful page read does not mean the full filing was read."
+    )
     parameters = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL of the web page to read"},
+            "offset": {"type": "integer", "minimum": 0, "default": 0,
+                       "description": "Character offset. Use pagination.next_offset from the prior result for later sections."},
+            "max_chars": {"type": "integer", "minimum": 1, "maximum": _MAX_LENGTH, "default": _MAX_LENGTH,
+                          "description": "Maximum characters to return in this page."},
             "no_cache": {
                 "type": "boolean",
                 "description": (
@@ -162,4 +189,5 @@ class WebReaderTool(BaseTool):
 
     def execute(self, **kwargs) -> str:
         """Fetch web page."""
-        return read_url(kwargs["url"], no_cache=bool(kwargs.get("no_cache", False)))
+        return read_url(kwargs["url"], no_cache=bool(kwargs.get("no_cache", False)),
+                        offset=kwargs.get("offset", 0), max_chars=kwargs.get("max_chars", _MAX_LENGTH))

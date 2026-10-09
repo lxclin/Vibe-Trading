@@ -12,8 +12,10 @@ import json
 import math
 import os
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 from src.agent.grounding.identity import (
     _CANONICAL_SYMBOL_RE,
@@ -449,6 +451,66 @@ def _formula_in_note(note: str) -> tuple[float, list[float], ast.Expression] | N
 
 class _PolicyMixin:
     """Policy behaviour of :class:`GroundingLedger`."""
+
+    def _verified_derived_valuation_symbols(
+        self, block: FiguresBlock, figures: Sequence[Figure], numeric_issues: Sequence[Mapping[str, Any]],
+    ) -> set[str]:
+        """Recognize a validated raw-price/BPS or annual-EPS reference ratio.
+
+        This is an alternative to a provider multiple, not a fair-value check.
+        Every input must have an exact, unique field reference. Interim EPS,
+        forecasts, adjusted prices and unanchored constants cannot qualify.
+        """
+        if numeric_issues:
+            return set()
+        verified = set()
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        for declaration in block.declarations:
+            if declaration.role != "derived" or declaration.value <= 0:
+                continue
+            if not any(figure.shape == "measured" and not figure.percent and not figure.currency
+                       and block.match(figure.value, figure.percent, figure.digits) == declaration for figure in figures):
+                continue
+            symbols = _scan_symbols(declaration.note)
+            if len(symbols) != 1:
+                continue
+            symbol = next(iter(symbols))
+            formula = _formula_in_note(declaration.note)
+            if formula is None:
+                continue
+            node = formula[2].body
+            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
+                    and isinstance(node.left, ast.Constant) and isinstance(node.right, ast.Constant)):
+                continue
+            referenced = []
+            for ref in re.split(r"[;,，；]", declaration.ref):
+                scoped = self._referenced(ref.strip(), symbol, None) if "::" in ref else None
+                if scoped is None or len(scoped[0]) != 1 or scoped[1]:
+                    referenced = []
+                    break
+                referenced.extend(scoped[0])
+            quotes = [record for record in referenced if record.tool == "get_a_share_valuation"
+                      and record.field == "data.last_price" and record.symbol == symbol]
+            per_share = [record for record in referenced if record.tool == "get_financial_statements"
+                         and record.symbol == symbol
+                         and record.field.rsplit(".", 1)[-1] in {"BPS", "PER_NETASSET", "EPSJB"}]
+            if len(quotes) != 1 or len(per_share) != 1 or len(referenced) != 2:
+                continue
+            quote, basis = quotes[0], per_share[0]
+            if basis.value <= 0 or quote.value <= 0 or not quote.currency or quote.currency != basis.currency:
+                continue
+            is_eps = basis.field.rsplit(".", 1)[-1] == "EPSJB"
+            if is_eps and basis.report_period != "annual":
+                continue
+            try:
+                age = (today - date.fromisoformat(str(basis.timestamp)[:10])).days
+            except ValueError:
+                continue
+            if not 0 <= age <= (550 if is_eps else 270):
+                continue
+            if node.left.value == quote.value and node.right.value == basis.value:
+                verified.add(symbol)
+        return verified
 
     def _validate_identity(self, content: str) -> list[dict[str, Any]]:
         """Validate aggregate state and listed/private contradictions."""

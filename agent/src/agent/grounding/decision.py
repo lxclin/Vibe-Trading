@@ -241,6 +241,7 @@ def decision_issues(
     primary_symbols: set[str],
     tool_failures: Sequence[Any] = (),
     attempts: Sequence[Any] = (),
+    verified_valuation_symbols: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Require a directional, time-bound research view with minimum evidence."""
     issues: list[dict[str, Any]] = []
@@ -329,7 +330,8 @@ def decision_issues(
             profit = coverage["profitability"]
             cash = coverage["operating_cash_flow"]
             has_raw_quote = coverage["raw_quote"]["status"] == "observed"
-            has_valuation = coverage["valuation_multiple"]["status"] == "observed"
+            has_valuation = (coverage["valuation_multiple"]["status"] == "observed"
+                             or symbol in (verified_valuation_symbols or set()))
             has_financials = profit["status"] == "observed"
             if (profit["status"] != "observed" or cash["status"] != "observed"
                     or coverage["financial_periods_match"] is False) and stance != "incomplete":

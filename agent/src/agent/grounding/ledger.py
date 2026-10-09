@@ -31,7 +31,8 @@ from src.agent.grounding.identity_scope import (
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
 from src.agent.grounding.decision import decision_coverage, decision_issues, is_single_buy_question
 from src.agent.grounding.equity_research import (
-    equity_entry_answer_issues, equity_research_input_issues, equity_worksheet, is_equity_entry_research, needs_entry_inputs,
+    contextual_equity_research_question, equity_entry_answer_issues, equity_research_input_issues,
+    equity_worksheet, is_equity_entry_research, needs_entry_inputs,
 )
 from src.agent.grounding.figures import Figure, parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
@@ -197,9 +198,14 @@ class GroundingLedger(
         self._backtest_scopes: dict[str, str] = {}
         self._scope_latest: dict[str, str] = {}
         self._identity_required = bool(_ACTIONABLE_MARKET_RE.search(user_message))
-        self._decision_required = is_single_buy_question(user_message)
-        self._equity_research_required = is_equity_entry_research(user_message)
-        self._equity_entry_inputs_required = needs_entry_inputs(user_message)
+        self._equity_research_question = contextual_equity_research_question(user_message, history)
+        self._decision_required = is_single_buy_question(user_message) or (
+            self._equity_research_question != user_message
+            and needs_entry_inputs(self._equity_research_question)
+            and is_single_buy_question(user_message + " 是否值得买入")
+        )
+        self._equity_research_required = is_equity_entry_research(self._equity_research_question)
+        self._equity_entry_inputs_required = needs_entry_inputs(self._equity_research_question)
         self._buffer_output = self._identity_required
         # Every instrument this run is entitled to write about: the ones the
         # user named, plus the ones a succeeding tool call passed in or returned.
@@ -537,11 +543,14 @@ class GroundingLedger(
             and self._is_safe_identity_abstention(content)
         ):
             issues.extend(self._validate_unsourced_symbols(content, figures, block))
-            issues.extend(self._validate_figures(content, block, figures))
+            numeric_issues = self._validate_figures(content, block, figures)
+            issues.extend(numeric_issues)
+            verified_valuation_symbols = self._verified_derived_valuation_symbols(block, figures, numeric_issues)
             if self._decision_required and self.identity_status == "locked":
                 issues.extend(decision_issues(
                     content, self._evidence, self.primary_symbols, self._tool_failures,
                     self._decision_tool_attempts,
+                    verified_valuation_symbols=verified_valuation_symbols,
                 ))
             if self._equity_entry_inputs_required and self.identity_status == "locked":
                 issues.extend(equity_research_input_issues(
@@ -549,6 +558,7 @@ class GroundingLedger(
                 ))
                 issues.extend(equity_entry_answer_issues(
                     content, self._evidence, self.authorized_symbols, self._decision_tool_attempts,
+                    verified_valuation_symbols=verified_valuation_symbols,
                 ))
         issues = self._dedupe_issues(issues)
         result = ValidationResult(
@@ -594,6 +604,7 @@ class GroundingLedger(
                 "evidence": [asdict(record) for record in self._evidence],
                 "tool_failures": list(self._tool_failures),
                 "decision_tool_attempts": list(self._decision_tool_attempts),
+                "equity_research_context": self._equity_research_question if self._equity_research_required else None,
                 "research_coverage": (
                     decision_coverage(
                         self._evidence, primary,

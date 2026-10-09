@@ -1319,6 +1319,13 @@ class AgentLoop:
             messages[0]["content"] += "\n\n" + decision_guidance(self._grounding._prefer_chinese)
         if self._grounding._equity_research_required:
             messages[0]["content"] += "\n\n" + equity_research_guidance(self._grounding._prefer_chinese)
+            if self._grounding._equity_research_question != user_message:
+                messages[0]["content"] += (
+                    "\n\n[EQUITY RESEARCH CONTEXT] The current company-evaluation follow-up "
+                    "continues this explicit user investment objective. Resolve the current "
+                    "company independently; do not substitute a previous ticker:\n"
+                    + self._grounding._equity_research_question
+                )
         react_trace: List[Dict[str, Any]] = []
 
         trace_dir = SESSIONS_DIR / session_id if session_id else run_dir

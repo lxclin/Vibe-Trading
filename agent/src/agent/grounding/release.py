@@ -329,6 +329,7 @@ class _ReleaseMixin:
                 "decision_profitability_not_checked", "decision_cash_flow_not_checked",
                 "decision_quarterly_financials_not_checked",
                 "decision_income_not_checked",
+                "decision_capex_not_checked", "decision_valuation_basis_not_checked",
             }:
                 return "get_financial_statements"
         if self.identity_status == "locked" and any(
@@ -356,6 +357,7 @@ class _ReleaseMixin:
                     "decision_raw_valuation_not_checked", "decision_profitability_not_checked",
                     "decision_cash_flow_not_checked", "decision_quarterly_financials_not_checked",
                     "decision_income_not_checked",
+                    "decision_capex_not_checked", "decision_valuation_basis_not_checked",
                 }
             ]
             return (
