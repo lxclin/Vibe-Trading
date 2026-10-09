@@ -310,6 +310,7 @@ class SwarmRun(BaseModel):
     reasoning_effort: str | None = None
     use_responses_api: bool | None = None
     grounding_data: dict[str, list[dict]] | None = None
+    research_receipts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class WorkerResult(BaseModel):
@@ -328,6 +329,7 @@ class WorkerResult(BaseModel):
 
     status: WorkerStatus
     research_worksheet: dict[str, Any] | None = None
+    research_receipts: list[dict[str, Any]] = Field(default_factory=list)
     summary: str
     artifact_paths: list[str] = Field(default_factory=list)
     iterations: int = 0

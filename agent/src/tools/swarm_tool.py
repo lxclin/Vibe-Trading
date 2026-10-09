@@ -700,6 +700,7 @@ def _format_result(
         "preset": preset,
         "auto_variables": variables,
         "final_report": run.final_report or "",
+        "research_receipts": getattr(run, "research_receipts", []),
         "error": run_level_error(run),
         "tasks": task_summaries,
         "token_usage": {

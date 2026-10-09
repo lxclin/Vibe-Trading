@@ -38,6 +38,7 @@ from src.agent.grounding.figures import Figure, parse_figures_block, scan_figure
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
 from src.agent.grounding.registry import GROUNDING_CHECKS
 from src.agent.grounding.research_plan import research_attempt
+from src.agent.grounding.research_handoff import scoped_receipts
 from src.agent.grounding.release import (
     MAX_GROUNDING_RECOVERY_ROUNDS,
     MAX_PRICE_EVIDENCE_ATTEMPTS,
@@ -181,6 +182,8 @@ class GroundingLedger(
         self._tool_failures: list[dict[str, Any]] = []
         self._decision_tool_attempts: list[dict[str, Any]] = []
         self._source_research_attempts: list[dict[str, Any]] = []
+        self._research_handoffs: list[dict[str, Any]] = []
+        self._imported_research_calls: set[str] = set()
         self._analysis_completed: list[dict[str, Any]] = []
         self._analysis_metrics: list[dict[str, Any]] = []
         self._validations: list[dict[str, Any]] = []
@@ -425,6 +428,17 @@ class GroundingLedger(
             success: Result-envelope success classification.
         """
         payload = _json_object(result)
+        if tool_name == "run_swarm":
+            if success and payload is not None:
+                self.ingest_research_handoff(
+                    payload.get("research_receipts"), source_call_id=call_id,
+                )
+            elif not success:
+                self._record_tool_failure(tool_name, call_id, result)
+            # A committee report is a narrative, never an observed numeric
+            # payload. Only original executed tool returns may enter the ledger.
+            self.persist()
+            return
         if self._equity_entry_inputs_required and tool_name in {"web_search", "read_url"}:
             attempt = research_attempt(
                 tool_name, arguments, payload, call_id, success,
@@ -475,6 +489,26 @@ class GroundingLedger(
             self._ingest_engine_table(payload, call_id, tool_name=tool_name)
         elif payload is not None:
             self._ingest_generic_numeric(tool_name, arguments, payload, call_id)
+        self.persist()
+
+    def ingest_research_handoff(self, receipts: Any, *, source_call_id: str) -> None:
+        """Replay same-subject team observations through existing tool parsers."""
+        existing_calls = {record.call_id for record in self._evidence}
+        existing_calls.update(attempt["call_id"] for attempt in self._decision_tool_attempts)
+        imported = []
+        for receipt in scoped_receipts(receipts, self.authorized_symbols):
+            call_id = receipt["call_id"]
+            if call_id in self._imported_research_calls or call_id in existing_calls:
+                continue
+            self.ingest_tool_result(
+                tool_name=receipt["tool"], arguments=receipt["arguments"],
+                result=receipt["result"], call_id=call_id, success=receipt["success"],
+            )
+            self._imported_research_calls.add(call_id)
+            imported.append(call_id)
+        if imported:
+            self._research_handoffs.append({"source_call_id": source_call_id, "call_ids": imported,
+                                            "boundary": "Original team tool returns, not independent source verification."})
         self.persist()
 
     def validate_final_answer(self, content: str) -> ValidationResult:
@@ -633,6 +667,7 @@ class GroundingLedger(
                 "tool_failures": list(self._tool_failures),
                 "decision_tool_attempts": list(self._decision_tool_attempts),
                 "source_research_attempts": list(self._source_research_attempts),
+                "research_handoffs": list(self._research_handoffs),
                 "equity_research_context": self._equity_research_question if self._equity_research_required else None,
                 "research_coverage": (
                     decision_coverage(

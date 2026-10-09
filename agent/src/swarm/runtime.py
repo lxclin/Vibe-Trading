@@ -25,6 +25,7 @@ from typing import Callable
 
 from src.config.accessor import get_env_config
 from src.config.schema import AgentConfig
+from src.agent.grounding.research_handoff import merge_receipts
 from src.providers.llm import _ensure_dotenv, uses_responses_api
 from src.swarm import grounding
 from src.swarm.models import (
@@ -530,6 +531,7 @@ class SwarmRuntime:
                     run.total_output_tokens += result.output_tokens
 
                     if result.status == "completed":
+                        run.research_receipts = merge_receipts(run.research_receipts, result.research_receipts)
                         if (run.preset_name == "investment_committee" and tid == "task-evidence"
                                 and result.research_worksheet):
                             # Share the framework's actual observations as well as
@@ -750,6 +752,9 @@ class SwarmRuntime:
 
         prev_agents = {a.id: a for a in resume_from.agents}
         new_agents = {a.id: a for a in run.agents}
+        if any(agent.research_worksheet for agent in run.agents) and not resume_from.research_receipts:
+            logger.info("Resume: prior research run has no original tool receipts; replaying fresh")
+            return
 
         # Phase 1: candidates = completed tasks whose own definition is unchanged.
         to_keep: set[str] = set()
@@ -789,6 +794,9 @@ class SwarmRuntime:
                         break
 
         # Phase 3: apply the keep for the survivors.
+        run.research_receipts = merge_receipts(run.research_receipts, [
+            receipt for receipt in resume_from.research_receipts if receipt.get("task_id") in to_keep
+        ])
         kept = 0
         for task in run.tasks:
             if task.id not in to_keep:
@@ -1014,6 +1022,7 @@ class SwarmRuntime:
                     run_id=run.id,
                     include_shell_tools=include_shell_tools,
                     grounding_block=grounding_block,
+                    research_receipts=list(run.research_receipts) if agent_spec.research_worksheet else None,
                     cancel_event=cancel_event,
                 )
                 futures[future] = tid
@@ -1077,6 +1086,7 @@ class SwarmRuntime:
         include_shell_tools: bool = False,
         grounding_block: str = "",
         cancel_event: threading.Event | None = None,
+        research_receipts: list[dict] | None = None,
     ) -> WorkerResult:
         """Run a worker with automatic retry on failure.
 
@@ -1168,6 +1178,7 @@ class SwarmRuntime:
                 grounding_block=grounding_block,
                 agent_config=self._agent_config,
                 cancel_event=cancel_event,
+                research_receipts=research_receipts,
             )
 
             cumulative_input_tokens += result.input_tokens

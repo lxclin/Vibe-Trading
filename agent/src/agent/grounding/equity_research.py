@@ -274,6 +274,14 @@ def equity_worksheet(
                     ][:4]}
 
         coverage = decision_coverage(records, symbol, attempts)
+        quote_ref = coverage["raw_quote"].get("ref") or ""
+        quote_call_id = quote_ref.partition("::")[0]
+        quote_fields = {
+            record.field.removeprefix("data."): _fact(record)
+            for record in records if record.symbol == symbol and record.tool == "get_a_share_valuation"
+            and record.call_id == quote_call_id and _observed(record)
+            and record.field in {"data.last_price", "data.pe_ttm", "data.pb", "data.market_cap_cny"}
+        }
         names = (company_names or {}).get(symbol, [])
         sector_fields = {record.field.rsplit(".", 1)[-1].upper() for record in financials}
         sector = ("bank" if sector_fields.intersection({"NONPERLOAN", "NET_INTEREST_MARGIN"}) or any("银行" in name for name in names)
@@ -312,6 +320,11 @@ def equity_worksheet(
                             "Missing checks mean insufficient comparable inputs, not a clean bill of health.",
             },
             "coverage": coverage, "missing_same_period_inputs": missing,
+            "valuation_snapshot": {
+                "fields": quote_fields,
+                "boundary": "One timestamped raw-quote call only. Provider PE/PB are observed ratios, "
+                            "not verified fair value. Do not fill missing fields from another snapshot.",
+            },
             "valuation_recovery_inputs": {
                 "latest_annual_eps": _fact(latest_annual) if latest_annual is not None else None,
                 "current_bps": facts.get("book_value_per_share"),
@@ -385,6 +398,8 @@ def equity_research_guidance(chinese: bool) -> str:
             "安全边际=1−现价÷基准估值。它们分母不同，不要混称。亏损企业不采用PE；使用其他适合的方法。"
             "计算正确不代表假设可靠；没有合理假设就说明无法量化，仍给出已有证据支持的相对排序，不编目标价或胜率。"
             "三、回答：保留‘盈利质量’和‘估值与价格’两节，可简短。第一段说明是初筛排序、条件性偏好，还是已论证当前买入；"
+            "若团队已完成研究或刚完成补查，最终回答必须独立完整，整合原结论与新增证据，不能只写‘已补读’或‘结论不变’。"
+            "valuation_snapshot保留同次原始报价的价格、PE/PB及精确引用；已取得的倍数须解释其口径和意义，不能因旧工具正文压缩而当作缺失。"
             "紧接结论分别写公司判断、当前价格判断和当前行动，逐项给出支持证据；公司判断可为偏积极/中性/偏谨慎，价格判断可为有吸引力/合理/偏贵/依据不足。"
             "‘研究未完成’只限定尚未论证的部分，仍须回答已有证据支持的公司质量和相对偏好；不得凭数据缺失把公司判断写成偏谨慎。"
             "列出最影响结论的两项缺口，并说明各自什么核验结果会令判断上调或下调，避免只写‘补齐资料后再评估’。"
@@ -430,6 +445,9 @@ def equity_research_guidance(chinese: bool) -> str:
         "Do not use PE for loss-makers, skill examples as data, or calculator output as evidence assumptions are true. "
         "If inputs are unavailable, give a bounded relative ranking without invented targets or win rates. "
         "Identify whether the answer is screening, a conditional preference, or a supported current-entry view. "
+        "After team research or supplementary checks, deliver a self-contained final report integrating the existing conclusion "
+        "and new findings, not only an update saying unchanged. Explain observed valuation_snapshot ratios with their exact "
+        "source/time and limitations; compacted tool bodies do not mean the persisted observations are missing. "
         "Separate company-quality view, current-price assessment and current action, each with its supporting evidence. "
         "Scope research incomplete to the unproven part; preserve supported business-quality or relative preferences. "
         "Name the two gaps most likely to change the decision and explain what result would move the view up or down. "

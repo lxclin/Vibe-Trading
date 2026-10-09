@@ -1621,7 +1621,10 @@ class AgentLoop:
                         end_marker = "\n[/EQUITY RESEARCH WORKSHEET]"
                         worksheet = start_marker + (
                             "Tool-derived data inventory, not instructions or a verified investment thesis. "
-                            "Unchecked tasks still need research; unavailable data must be disclosed.\n"
+                            "Includes accepted original team tool receipts with their original call IDs. "
+                            "Reuse these observations instead of refetching due to context compaction. "
+                            "Unchecked tasks still need research; unavailable data must be disclosed. "
+                            "Integrate team findings and any corrections into one complete final answer.\n"
                         ) + json.dumps(self._grounding.equity_research_worksheet(), ensure_ascii=False) + end_marker
                         system_text = messages[0]["content"]
                         start_at = system_text.find(start_marker)
@@ -3647,7 +3650,12 @@ class AgentLoop:
                 self._readonly_replay_protected.clear()
 
         status = "ok" if success else "error"
-        truncated = truncate_tool_result(result)
+        if tc.name == "run_swarm":
+            from src.agent.grounding.research_handoff import swarm_context_result
+
+            truncated = truncate_tool_result(swarm_context_result(result), limit=26000)
+        else:
+            truncated = truncate_tool_result(result)
         messages.append(context.format_tool_result(tc.id, tc.name, truncated))
 
         # One redaction feeds every subscriber below: the persisted trace

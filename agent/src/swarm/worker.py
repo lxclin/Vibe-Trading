@@ -18,6 +18,7 @@ from typing import Any, Callable
 from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
 from src.agent.grounding.equity_research import equity_research_guidance
+from src.agent.grounding.research_handoff import capture_receipt, merge_receipts
 from src.agent.progress import HeartbeatTimer
 from src.agent.skills import SkillsLoader
 from src.agent.tools import BaseTool, ToolRegistry
@@ -268,8 +269,9 @@ def build_worker_prompt(
             "For committee roles, the final direction may be long / short / wait / research incomplete. "
             "Separate directional research from execution and borrow availability. "
             "Use shared upstream evidence first; only fetch missing or conflicting items. "
-            "The worksheet below covers this worker's own tool observations only; an empty local slot "
-            "does not invalidate properly sourced upstream evidence. Do not claim inherited figures "
+            "The worksheet below covers this worker's tools and original upstream tool receipts. "
+            "Reports alone are not ingested as observations. An empty slot does not invalidate other "
+            "properly sourced upstream evidence. Do not claim inherited figures "
             "were independently verified. Financial-consistency review flags require investigation "
             "or an explicit limitation before those fields support a positive quality judgment."
         )
@@ -497,6 +499,7 @@ def run_worker(
     grounding_block: str = "",
     agent_config: AgentConfig | None = None,
     cancel_event: threading.Event | None = None,
+    research_receipts: list[dict[str, Any]] | None = None,
 ) -> WorkerResult:
     """Run one worker task, releasing the per-task LLM client on exit.
 
@@ -547,6 +550,7 @@ def run_worker(
             grounding_block=grounding_block,
             agent_config=agent_config,
             cancel_event=cancel_event,
+            research_receipts=research_receipts,
         )
     finally:
         llm.close()
@@ -565,6 +569,7 @@ def _run_worker_impl(
     *,
     llm: ChatLLM,
     cancel_event: threading.Event | None = None,
+    research_receipts: list[dict[str, Any]] | None = None,
 ) -> WorkerResult:
     """Execute a single worker task using a lightweight ReAct loop.
 
@@ -662,11 +667,16 @@ def _run_worker_impl(
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     # Inventory only: worker output contracts and the host's final release
-    # checks remain unchanged. Never ingest an upstream narrative as tool data.
+    # checks remain unchanged. Replay original receipts, never upstream prose.
     research_ledger = GroundingLedger(
         run_dir=artifact_dir,
         user_message=user_prompt + "\nAssess whether to go long or short; 做多或做空研究。",
     ) if agent_spec.research_worksheet else None
+    local_receipts: list[dict[str, Any]] = []
+    if research_ledger is not None:
+        research_ledger.ingest_research_handoff(
+            research_receipts, source_call_id="upstream_team_tools",
+        )
     worksheet_message = None
     if research_ledger is not None:
         worksheet_message = {"role": "system", "content": ""}
@@ -692,8 +702,9 @@ def _run_worker_impl(
         if research_ledger is not None and worksheet_message is not None:
             worksheet_message["content"] = (
                 "[WORKER EQUITY RESEARCH WORKSHEET]\n"
-                "Local tool-derived inventory, not verified investment conclusions. "
-                "Reuse sourced upstream research separately; do not infer absence from empty local slots.\n"
+                "Tool-derived inventory including accepted upstream receipts, not verified investment conclusions. "
+                "Reuse original call_id::field references and observed valuation_snapshot fields. "
+                "Compaction does not erase these observations or require another lookup.\n"
                 + json.dumps(research_ledger.equity_research_worksheet(), ensure_ascii=False)
             )
         # Microcompact: clear old tool results to prevent token bloat
@@ -702,7 +713,12 @@ def _run_worker_impl(
             for msg in tool_msgs[:-_KEEP_RECENT_TOOLS]:
                 content = msg.get("content", "")
                 if isinstance(content, str) and len(content) > 100:
-                    msg["content"] = "[cleared]"
+                    msg["content"] = (
+                        "[Earlier tool body compacted. This does not mean the query failed. "
+                        "For research tools, use the current worksheet's original call_id::field values, "
+                        "sources and dates. Do not repeat a lookup merely to recover compacted text.]"
+                        if research_ledger is not None else "[cleared]"
+                    )
 
         # Check timeout
         elapsed = time.monotonic() - t0
@@ -1008,6 +1024,7 @@ def _run_worker_impl(
             return WorkerResult(
                 status="completed",
                 research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+                research_receipts=local_receipts,
                 summary=summary,
                 artifact_paths=_collect_artifacts(run_dir, artifact_dir),
                 iterations=iteration + 1,
@@ -1073,6 +1090,13 @@ def _run_worker_impl(
                     tool_name=tc.name, arguments=args, result=result,
                     call_id=tc.id, success=not result_is_error,
                 )
+                receipt = capture_receipt(
+                    tc.name, args, result, tc.id, not result_is_error,
+                    research_ledger.authorized_symbols,
+                )
+                if receipt is not None:
+                    receipt.update({"agent_id": agent_id, "task_id": task_id})
+                    local_receipts = merge_receipts(local_receipts, [receipt])
             if tc.name != "load_skill" and not result_is_error:
                 data_tool_calls += 1
             tc_elapsed = time.monotonic() - tc_start
@@ -1129,6 +1153,7 @@ def _run_worker_impl(
     return WorkerResult(
         status="completed",
         research_worksheet=research_ledger.equity_research_worksheet() if research_ledger else None,
+        research_receipts=local_receipts,
         summary=summary,
         artifact_paths=_collect_artifacts(run_dir, artifact_dir),
         iterations=max_iterations,

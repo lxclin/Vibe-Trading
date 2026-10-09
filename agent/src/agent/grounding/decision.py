@@ -100,8 +100,9 @@ def decision_coverage(
         if record.tool == "get_a_share_valuation" and record.symbol == symbol
         and record.status == "observed"
     ]
-    quote = next((record for record in reversed(quotes) if record.field == "data.last_price"
-                  and isinstance(record.value, (int, float)) and record.value > 0), None)
+    quote = max((record for record in quotes if record.field == "data.last_price"
+                 and isinstance(record.value, (int, float)) and record.value > 0),
+                key=lambda record: record.timestamp or "", default=None)
     multiple = next((record for record in reversed(quotes) if record.field in {"data.pe_ttm", "data.pb"}
                      and isinstance(record.value, (int, float)) and record.value > 0
                      and quote is not None and record.call_id == quote.call_id), None)
@@ -118,6 +119,8 @@ def decision_coverage(
         return {
             "status": "observed" if record is not None else ("unavailable" if attempted else "unchecked"),
             "field": record.field if record is not None else None,
+            "value": record.value if record is not None else None,
+            "ref": f"{record.call_id}::{record.field}" if record is not None else None,
             "as_of": record.timestamp if record is not None else None,
             "source": record.source if record is not None else None,
             "report_period": getattr(record, "report_period", None) if record is not None else None,
