@@ -201,3 +201,21 @@ def test_fund_contract_uses_nav_and_price_without_company_financials():
                                field="web_financial.unit_nav", value=8.6915)]
     text = "结论：暂不买入（等待）；期限：3—6个月；信心：低。主要依据：黄金实际利率上行。改变判断的条件：比较同步IOPV与市价，利率回落。"
     assert not decision_issues(text, records, {"518850.SH"})
+
+
+def test_real_bank_provenance_round_can_be_repaired_locally(tmp_path):
+    data = json.loads((FIXTURES / "bank_provenance.json").read_text())
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=(
+        "招商银行600036.SH现在是否值得买入？持有期限6—12个月。比较同口径银行估值。"))
+    for item in data["receipts"]:
+        ledger.ingest_tool_result(tool_name=item["tool"], arguments=item["arguments"], result=item["result"],
+                                  call_id=item["call_id"], success=item["success"])
+    draft = data["draft"]
+    check = ledger.validate_final_answer(draft)
+    assert not check.valid
+    assert {i["code"] for i in check.issues} == {"data_source_not_surfaced", "currency_not_surfaced"}
+    repaired = ledger.repair_metadata(draft, check)
+    assert repaired is not None and repaired.startswith(draft)
+    assert ledger.revalidate(repaired).valid
+    assert "tencent" in repaired and "CNY" in repaired
+    assert ledger.validation_count == 1

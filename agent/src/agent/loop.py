@@ -1955,26 +1955,13 @@ class AgentLoop:
                             {"delta": final_content, "iter": current_iter},
                         )
                         syntax_fallback_emitted = True
+                    delivery_requests = []
                     if (self._grounding is not None
                             and getattr(self._grounding, "_equity_research_required", False)
                             and not research_delivery_reviewed and not forced_grounding_release
                             and iteration + 1 < self.max_iterations
                             and self._grounding.equity_research_worksheet().get("companies")):
-                        research_delivery_reviewed = True
-                        requests = delivery_review(final_content)
-                        if requests:
-                            if not buffer_text_output and streamed_chars:
-                                self._emit("stream_reset", {"iter": current_iter, "reason": "research_delivery_review"})
-                            trace.write({"type": "research_delivery_review", "iter": current_iter, "requests": requests})
-                            messages.append({"role": "assistant", "content": final_content})
-                            messages.append({"role": "system", "content":
-                                "[RESEARCH DELIVERY REVIEW] Revise this complete answer once using existing evidence only. "
-                                "Preserve supported findings, exact citations and the figures block; do not restart retrieval. "
-                                "Do not fabricate missing inputs or upgrade confidence to satisfy the format. "
-                                + " ".join(requests)})
-                            grounding_correction_text_only = True
-                            final_content = ""
-                            continue
+                        delivery_requests = delivery_review(final_content)
                     if self._grounding is not None:
                         validation = (
                             self._grounding.revalidate(final_content)
@@ -1985,9 +1972,7 @@ class AgentLoop:
                             # Repair unique exact-field citations or provenance
                             # metadata without changing numeric claims. Every
                             # repaired answer still passes the complete gate.
-                            repaired = self._grounding.repair_references(final_content, validation)
-                            if repaired is None:
-                                repaired = self._grounding.repair_provenance(final_content, validation)
+                            repaired = self._grounding.repair_metadata(final_content, validation)
                             if repaired is not None:
                                 # Non-recording: no model round produced this
                                 # text, and ``validation_count`` is the
@@ -2007,6 +1992,20 @@ class AgentLoop:
                                     final_content = repaired
                                     validation = recheck
                         if validation.valid:
+                            if delivery_requests:
+                                research_delivery_reviewed = True
+                                if not buffer_text_output and streamed_chars:
+                                    self._emit("stream_reset", {"iter": current_iter, "reason": "research_delivery_review"})
+                                trace.write({"type": "research_delivery_review", "iter": current_iter, "requests": delivery_requests})
+                                messages.append({"role": "assistant", "content": final_content})
+                                messages.append({"role": "system", "content":
+                                    "[RESEARCH DELIVERY REVIEW] Revise this complete answer once using existing evidence only. "
+                                    "Preserve supported findings, exact citations and the figures block; do not restart retrieval. "
+                                    "Do not fabricate missing inputs or upgrade confidence to satisfy the format. "
+                                    + " ".join(delivery_requests)})
+                                grounding_correction_text_only = True
+                                final_content = ""
+                                continue
                             # The figures block is the model's declaration to
                             # the gate, not answer text.
                             final_content = validation.released_text
@@ -2072,10 +2071,20 @@ class AgentLoop:
                                 final_content = ""
                                 continue
                             if not forced_grounding_release:
+                                correction = self._grounding.correction_prompt(validation)
+                                if delivery_requests:
+                                    research_delivery_reviewed = True
+                                    correction += (
+                                        "\n[RESEARCH DELIVERY REVIEW] In the same correction, address these presentation gaps "
+                                        "using existing evidence only. Preserve supported analysis, do not restart retrieval "
+                                        "or fabricate missing inputs: " + " ".join(delivery_requests)
+                                    )
+                                    trace.write({"type": "research_delivery_review", "iter": current_iter,
+                                                 "requests": delivery_requests, "combined_with_grounding": True})
                                 messages.append(
                                     {
                                         "role": "user",
-                                        "content": f"<system>{self._grounding.correction_prompt(validation)}</system>",
+                                        "content": f"<system>{correction}</system>",
                                     }
                                 )
                             rejected_draft = final_content

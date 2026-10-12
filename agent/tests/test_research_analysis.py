@@ -101,6 +101,61 @@ def test_unique_tool_reference_repairs_metadata_without_changing_report(tmp_path
     assert ledger.validation_count == 1
 
 
+def test_combined_metadata_repair_avoids_a_model_round(tmp_path):
+    from tests.test_grounding_role_hardening import _ledger, MARKET_A, XRAY, HDR, ROW, _block
+    ledger = _ledger(tmp_path, MARKET_A, XRAY, message="Compare portfolio tail risk.")
+    prose = HDR.replace("akshare", "") + " VaR 95%: 1.57%。"
+    draft = prose + _block(ROW, "95% | count | confidence",
+                           "1.57% | observed | VaR 95% | portfolio_risk_xray::data.tail_risk.var_95")
+    check = ledger.validate_final_answer(draft)
+    assert ledger.repair_references(draft, check) is None
+    assert ledger.repair_provenance(draft, check) is None
+    repaired = ledger.repair_metadata(draft, check)
+    assert repaired is not None
+    assert repaired.startswith(prose)
+    assert "x1::data.tail_risk.var_95" in repaired
+    assert "akshare" in repaired
+    assert ledger.revalidate(repaired).valid
+    assert ledger.validation_count == 1
+    bad = draft.replace("1.57%", "9.99%")
+    assert ledger.repair_metadata(bad, ledger.validate_final_answer(bad)) is None
+
+
+def test_nested_raw_quote_provenance_is_repaired_without_rewriting(tmp_path):
+    from src.agent.grounding import GroundingLedger
+    from tests.test_research_handoff_regression import quote
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="601899.SH最新报价是多少？")
+    ledger.ingest_research_handoff([quote()], source_call_id="team")
+    draft = "601899.SH 最新报价30元。"
+    check = ledger.validate_final_answer(draft)
+    assert not check.valid
+    assert {i["code"] for i in check.issues} <= {"data_source_not_surfaced", "currency_not_surfaced"}
+    repaired = ledger.repair_metadata(draft, check)
+    assert repaired is not None and repaired.startswith(draft)
+    assert "eastmoney_quote" in repaired and "CNY" in repaired
+    assert ledger.revalidate(repaired).valid
+
+
+def test_delivery_and_grounding_feedback_share_one_model_revision(tmp_path, monkeypatch):
+    from src.agent.grounding import GroundingLedger, ValidationResult
+    from tests.test_agent_loop_no_assistant_prefill import _StubLLM, _build_agent
+    checks = []
+
+    def validate(self, text):
+        checks.append(text)
+        return ValidationResult(valid=len(checks) > 1, released_text=text,
+                                issues=[] if len(checks) > 1 else [{"code": "currency_not_surfaced"}])
+
+    monkeypatch.setattr(GroundingLedger, "validate_final_answer", validate)
+    monkeypatch.setattr(GroundingLedger, "repair_metadata", lambda *args: None)
+    monkeypatch.setattr(GroundingLedger, "recovery_action", lambda *args: None)
+    llm = _StubLLM()
+    result = _build_agent(llm, max_iter=5, tmp_run_dir=tmp_path / "run").run("601899.SH是否值得买入")
+    assert result["status"] == "success"
+    assert llm.call_count == 2
+    assert any("[RESEARCH DELIVERY REVIEW]" in m.get("content", "") for m in llm.seen_messages[1])
+
+
 @pytest.mark.parametrize("mode", ["ambiguous", "alias", "wrong_value", "unrelated_bad_value"])
 def test_reference_repair_does_not_guess_or_bypass_other_failures(tmp_path, mode):
     from tests.test_grounding_role_hardening import _ledger, MARKET_A, XRAY, XRAY_SECOND, HDR, ROW, _block
@@ -110,7 +165,9 @@ def test_reference_repair_does_not_guess_or_bypass_other_failures(tmp_path, mode
     value = "9.99%" if mode == "wrong_value" else "1.57%"
     draft = HDR + f" VaR 95%: {value}。" + (" Price 9999 CNY." if mode == "unrelated_bad_value" else "")
     draft += _block(ROW, "95% | count | confidence", f"{value} | observed | VaR 95% | {reference}")
-    assert ledger.repair_references(draft, ledger.validate_final_answer(draft)) is None
+    check = ledger.validate_final_answer(draft)
+    assert ledger.repair_references(draft, check) is None
+    assert ledger.repair_metadata(draft, check) is None
 
 
 @pytest.mark.parametrize("budget,expected_calls", [(1, 1), (2, 1), (4, 2)])

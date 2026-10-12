@@ -648,7 +648,8 @@ class _ReleaseMixin:
         Returns:
             The note, or None when the run observed no price.
         """
-        price_records = self._price_records()
+        price_records = [record for record in self._comparable_price_records()
+                         if record.field in {"open", "high", "low", "close", "adj_close", "price"}]
         if not price_records:
             return None
         is_zh = self._user_writes_chinese()
@@ -684,6 +685,11 @@ class _ReleaseMixin:
         stay with the model correction path. Recheck the entire answer before
         returning; this cannot approve an unrelated bad claim.
         """
+        text = self._repair_reference_text(content, validation)
+        return text if text is not None and self.revalidate(text).valid else None
+
+    def _repair_reference_text(self, content: str, validation: ValidationResult) -> str | None:
+        """Produce a metadata-only candidate; callers must revalidate it."""
         replacements: dict[str, str] = {}
         for issue in validation.issues:
             if issue.get("reason") != "field_ref_needs_call_id":
@@ -709,9 +715,23 @@ class _ReleaseMixin:
                 fragment = re.sub(r"(?m)([|｜]\s*)" + re.escape(old) + r"(\s*(?:[|｜]\s*)?$)",
                                   lambda match: match.group(1) + new + match.group(2), fragment)
             text = text[:start] + fragment + text[end:]
-        if text == content or not self.revalidate(text).valid:
-            return None
-        return text
+        return text if text != content else None
+
+    def repair_metadata(self, content: str, validation: ValidationResult) -> str | None:
+        """Compose exact-reference and provenance repairs before the full gate.
+
+        Neither repair may change a number, report period, claim or conclusion.
+        Mixed defects must not force a model round merely because each repair
+        separately requires the other defect to have been resolved first.
+        """
+        text = self._repair_reference_text(content, validation) or content
+        check = self.revalidate(text) if text != content else validation
+        if not check.valid:
+            candidate = self.repair_provenance(text, check)
+            if candidate is not None:
+                text = candidate
+                check = self.revalidate(text)
+        return text if text != content and check.valid else None
 
     def repair_provenance(
         self,
