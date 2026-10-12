@@ -54,7 +54,7 @@ def summarize(events, *, usage_rows=()):
                     row["empty_searches"] += isinstance(payload, dict) and payload.get("results") == []
                 except (TypeError, ValueError):
                     pass
-        if kind in {"answer_rejected", "answer_repaired", "research_delivery_review",
+        if kind in {"answer_rejected", "answer_repaired", "answer_derivation_omitted", "research_delivery_review",
                     "tool_result_reused", "tool_result_cached", "tool_result_replayed"}:
             edits[kind] += 1
     # Historical traces lack model call events. Artifact usage covers only

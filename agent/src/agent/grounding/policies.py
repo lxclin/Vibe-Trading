@@ -840,7 +840,7 @@ class _PolicyMixin:
                     )
                     continue
             if declaration is None:
-                found = self._check_observed(figure, None, symbol, records)
+                found = self._check_observed(figure, None, symbol, records, content=content)
                 if block.present and found:
                     # Declared, but as a fraction where the answer writes a
                     # percent (or the reverse): still undeclared, since the
@@ -929,7 +929,7 @@ class _PolicyMixin:
                     self._check_proposed(figure, declaration, symbol, records)
                 )
                 continue
-            issues.extend(self._check_observed(figure, declaration, symbol, records))
+            issues.extend(self._check_observed(figure, declaration, symbol, records, content=content))
         # The dedicated raw quote is nested. Keep provenance scoped to actual
         # market feeds: indicators and calculator echoes are not quote providers.
         market_records = self._price_records() + [
@@ -1851,6 +1851,7 @@ class _PolicyMixin:
         declaration: Declaration | None,
         symbol: str | None,
         records: Sequence[EvidenceRecord],
+        *, content: str = "",
     ) -> list[dict[str, Any]]:
         """An observed figure must appear in evidence of its own kind.
 
@@ -2039,6 +2040,13 @@ class _PolicyMixin:
                     "evidence to check it against",
                     field=figure.column,
                     date=figure.date,
+                    price_claim=not figure.percent and bool(
+                        figure.column or re.search(
+                            r"(?:现价|股价|收盘价?|开盘价?|最高价?|最低价?|成交价|价格|"
+                            r"last\s+price|close|price)\s*(?:为|是|约|[：:=])*\s*$",
+                            content[max(0, figure.start - 32):figure.start], re.I,
+                        )
+                    ),
                 )
             ]
         if self._matches_evidence(figure, direct, scaled, legacy_direct=True):

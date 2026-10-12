@@ -1992,6 +1992,14 @@ class AgentLoop:
                                     )
                                     final_content = repaired
                                     validation = recheck
+                        if not validation.valid:
+                            localized = self._grounding.repair_isolated_derivation(final_content, validation)
+                            if localized is not None:
+                                trace.write({"type": "answer_derivation_omitted", "iter": current_iter,
+                                             "issues": validation.issues, "preserved_analysis": True})
+                                react_trace.append({"type": "answer_derivation_omitted", "issues": validation.issues})
+                                final_content = localized
+                                validation = self._grounding.revalidate(localized)
                         if validation.valid:
                             if delivery_requests:
                                 research_delivery_reviewed = True

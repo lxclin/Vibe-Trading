@@ -332,13 +332,57 @@ class _ReleaseMixin:
                 "decision_capex_not_checked", "decision_valuation_basis_not_checked",
             }:
                 return "get_financial_statements"
+        # A missing formula operand or peer financial metric is not a missing
+        # quote. In particular, raw quotes arrive nested under data.last_price;
+        # use canonical price records rather than just OHLC tool receipts.
+        quoted_symbols = {
+            record.symbol for record in self._comparable_price_records()
+            if record.field in {"open", "high", "low", "close", "adj_close", "price"}
+        }
         if self.identity_status == "locked" and any(
-            issue.get("code") in {"numeric_claim_unavailable", "unsourced_symbol_figures"}
+            issue.get("code") == "numeric_claim_unavailable"
+            and issue.get("role") == "observed"
+            and issue.get("reason") == "no_evidence"
+            and issue.get("price_claim") is True
+            and issue.get("symbol") not in quoted_symbols
             for issue in validation.issues
         ):
             if self._price_evidence_attempts < MAX_PRICE_EVIDENCE_ATTEMPTS:
                 return "get_market_data"
         return None
+
+    def repair_isolated_derivation(
+        self, content: str, validation: ValidationResult,
+    ) -> str | None:
+        """Omit one unverifiable calculation without rewriting valid research.
+
+        Only a single derived value with missing operands is eligible. Identity,
+        checklist, citation, conflicting values and broader errors still take
+        the normal correction path. Keep the declarations until the full gate
+        checks the patched report, including its visible omission note.
+        """
+        if not self._equity_research_required or not validation.passed_figures:
+            return None
+        issues = validation.issues
+        if not issues or any(
+            issue.get("code") != "numeric_claim_unavailable"
+            or issue.get("role") != "derived"
+            or issue.get("reason") != "no_evidence"
+            or issue.get("value") is None
+            for issue in issues
+        ) or len({issue["value"] for issue in issues}) != 1:
+            return None
+        patched, removed = self._cut_flagged(content, issues)
+        if patched is None or not removed:
+            return None
+        note = (
+            "※ 略去无法核验输入依据的推导数值；该项仍存在证据缺口。"
+            if self._user_writes_chinese()
+            else "※ A derived figure was omitted because its inputs could not be verified; "
+            "that evidence gap remains."
+        )
+        patched += "\n\n" + note
+        return patched if self.revalidate(patched).valid else None
 
     def record_recovery(self, action: str) -> None:
         """Account one bounded recovery attempt against its budget."""

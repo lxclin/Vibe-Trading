@@ -90,6 +90,15 @@ def _market_payload(symbol: str = "562500.SS") -> str:
 
 
 class TestRecoveryAction:
+    @pytest.mark.parametrize("claim", ["股息率9.999%。", "净利润9.999亿元。", "每股收益9.999元。"])
+    def test_financial_gap_without_quote_does_not_trigger_price_recovery(self, tmp_path, claim):
+        ledger = _ledger(tmp_path)
+        ledger.ingest_tool_result(tool_name="search_symbol", arguments={"query": "机器人ETF"},
+                                  result=_resolver_payload(), call_id="resolve", success=True)
+        validation = ledger.validate_final_answer("562500.SS " + claim)
+        assert not validation.valid
+        assert ledger.recovery_action(validation) is None
+
     def test_unresolved_identity_instructs_symbol_search(self, tmp_path: Path) -> None:
         ledger = _ledger(tmp_path)
         validation = ledger.validate_final_answer("机器人ETF 现价 1.171。")
