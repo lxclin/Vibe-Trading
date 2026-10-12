@@ -296,3 +296,43 @@ def test_market_research_finishes_from_existing_evidence_before_no_progress(tmp_
         and record.get("reason") == "no_progress_recovery"
         for record in TraceWriter.read(run_dir)
     )
+
+
+def test_empty_search_variations_finish_from_nested_quote_evidence(tmp_path):
+    class QuoteTool(DiscoveryTool):
+        name = "get_a_share_valuation"
+
+    class SearchTool(DiscoveryTool):
+        name = "web_search"
+
+        def execute(self, **kwargs):
+            self.calls += 1
+            return json.dumps({"status": "ok", "query": kwargs["query"], "results": []})
+
+    class SearchLLM(DiscoveryLLM):
+        def stream_chat(self, messages, *, tools=None, **kwargs):
+            self.calls += 1
+            if tools is None:
+                return SimpleNamespace(content="518850.SH 已有报价证据；黄金驱动资料仍有缺口。",
+                    reasoning_content=None, has_tool_calls=False, tool_calls=[])
+            return SimpleNamespace(content="", reasoning_content=None, has_tool_calls=True,
+                tool_calls=[SimpleNamespace(id=f"call-{self.calls}",
+                    name="get_a_share_valuation" if self.calls == 1 else "web_search",
+                    arguments={"code": "518850.SH"} if self.calls == 1 else {"query": f"gold driver variant {self.calls}"})])
+
+    quote = QuoteTool([json.dumps({"ok": True, "source": "offline", "data": {
+        "symbol": "518850.SH", "last_price": 8.99, "price_adjustment": "raw"}})])
+    search = SearchTool([])
+    llm = SearchLLM()
+    loop, _, run_dir = build_loop(tmp_path, quote, llm)
+    loop.registry.register(search)
+    result = loop.run("518850.SH 是否值得买入")
+    assert result["status"] == "success"
+    assert search.calls == 6
+    assert llm.calls < loop.max_iterations
+    records = list(TraceWriter.read(run_dir))
+    assert any(e["type"] == "forced_text_only" and e.get("reason") == "no_progress_recovery" for e in records)
+    report = json.loads((run_dir / "research_cost.json").read_text())
+    assert report["totals"]["empty_searches"] == 6
+    assert report["totals"]["model_calls"] == llm.calls
+    assert report["totals"]["input_tokens"] is None

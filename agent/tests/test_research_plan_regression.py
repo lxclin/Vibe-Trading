@@ -4,6 +4,23 @@ import pytest
 
 from src.agent.grounding.research_plan import company_research_plan, research_attempt
 
+
+def test_priority_batch_prefers_unattempted_inputs_without_retrying_gaps():
+    from src.agent.grounding.research_plan import priority_batch
+    company = {"symbol": "601899.SH", "coverage": {
+        "raw_quote": {"status": "observed"}, "profitability": {"status": "unchecked"},
+        "operating_cash_flow": {"status": "unavailable"}},
+        "research_progress": {"income_statement": "unchecked"},
+        "source_research_plan": {"priority_actions": [{"tool": "web_search", "arguments": {"query": "drivers"}}]}}
+    result = priority_batch([company])
+    assert result["stage"] == "core_inputs"
+    assert [t["arguments"]["statement"] for t in result["independent_readonly_actions"]] == ["indicators", "income"]
+    company["coverage"]["profitability"]["status"] = "observed"
+    company["research_progress"]["income_statement"] = "unavailable"
+    assert priority_batch([company])["stage"] == "source_research"
+    company["symbol"] = "518850.SH"
+    assert priority_batch([company])["independent_readonly_actions"] == []
+
 SYMBOL = "601899.SH"
 URL = "https://www.sse.com.cn/disclosure/report.pdf"
 

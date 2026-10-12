@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import json
+
 from src.agent.tool_progress import (
     FAILURE_BLOCK_THRESHOLD,
     NO_PROGRESS_LIMIT,
     ToolProgress,
 )
+
+
+def test_changed_empty_search_queries_do_not_reset_stall_count():
+    progress = ToolProgress()
+    for i in range(3):
+        progress.record("web_search", ("web_search", str(i)),
+                        json.dumps({"status": "ok", "query": f"different query {i}", "results": []}),
+                        success=True)
+        progress.finish_iteration()
+        assert progress.stalled_iterations == i + 1
+    progress.record("web_search", ("web_search", "found"),
+                    '{"status":"ok","results":[{"url":"https://example.test/report"}]}', success=True)
+    progress.finish_iteration()
+    assert progress.stalled_iterations == 0
 
 
 def test_new_readonly_observation_resets_stall_chain() -> None:

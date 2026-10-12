@@ -77,6 +77,36 @@ def research_attempt(
     return None
 
 
+def priority_batch(companies: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Offer independent unattempted core reads before supplementary searches.
+
+    This is a schedule hint, not automatic execution or a sufficiency verdict.
+    Failed reads remain gaps; funds and other markets keep their own workflows.
+    """
+    stages = {"core_inputs": [], "supplementary_inputs": [], "source_research": []}
+    for company in companies:
+        symbol = company["symbol"]
+        if not re.fullmatch(r"[036]\d{5}\.(?:SH|SZ)", symbol):
+            continue
+        coverage = company["coverage"]
+        for slot, statement in (("raw_quote", None), ("profitability", "indicators"),
+                                ("operating_cash_flow", "cashflow"), ("income_statement", "income")):
+            status = (company["research_progress"].get(slot) if slot == "income_statement"
+                      else coverage[slot]["status"])
+            if status == "unchecked":
+                stages["core_inputs"].append({"tool": "get_financial_statements" if statement else "get_a_share_valuation",
+                    "arguments": {"code": symbol, **({"statement": statement, "period": "quarter"} if statement else {})}})
+        stages["supplementary_inputs"].extend({"tool": t["tool"], "arguments": t["arguments"]}
+                                                for t in company.get("next_statement_reads", []))
+        source = company.get("source_research_plan") or {}
+        stages["source_research"].extend({"tool": t["tool"], "arguments": t["arguments"]}
+                                           for t in source.get("priority_actions", []))
+    stage = next((name for name, actions in stages.items() if actions), "analyze_available_evidence")
+    return {"stage": stage, "independent_readonly_actions": stages.get(stage, [])[:8],
+            "boundary": "Batch independent reads only; wait for results before dependent calculations. "
+                        "Unavailable inputs remain disclosed gaps. An empty batch does not establish research completeness."}
+
+
 def company_research_plan(
     symbol: str, names: Sequence[str], report_date: str | None,
     coverage: Mapping[str, Any], attempts: Sequence[Mapping[str, Any]], *, sector: str,

@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from src.agent.grounding.analysis import multiple_comparisons, valuation_workbench
 from src.agent.grounding.decision import decision_coverage
-from src.agent.grounding.research_plan import company_research_plan
+from src.agent.grounding.research_plan import company_research_plan, priority_batch
 
 _RESEARCH_RE = re.compile(
     r"买入|值得买|能买吗|买什么|推荐.{0,6}买|投资价值|估值|市盈率|市净率|盈利质量|正常化盈利|"
@@ -360,6 +360,7 @@ def equity_worksheet(
         })
     return {
         "kind": "evidence_inventory_not_investment_verdict", "companies": sheets,
+        "priority_batch": priority_batch(sheets),
         "omitted_companies": companies[4:],
         "boundary": "Facts come from this run only. A successful query is not proof of sustainable earnings or a favorable entry price."
     }
@@ -380,6 +381,7 @@ def equity_research_guidance(chinese: bool) -> str:
             "只补需要的报表，同一失败请求不重复；报价工具已内置腾讯备用来源，仍失败时披露缺口，不把失败当看空。"
             "工作表中的unchecked是不曾查询，unavailable是查询未得到，observed_analysis_pending仅代表数据已取得，不能冒充分析完成。"
             "工作表列出next_statement_reads时，先执行尚未尝试的补查再写最终报告，不能只把可查问题列成未来清单。"
+            "priority_batch按未尝试的关键财务输入、补充输入、来源研究排序；其中独立只读动作可同轮提交。空批次不表示研究充分，仍须分析关键缺口。"
             "基础报价和同期财报齐备后，source_research_plan列出历史/同行估值及盈利驱动的priority_actions。"
             "工具可用且迭代预算允许时补查，独立主题可同轮查询，读候选正文须先取得链接并复用已取正文；每个主题仅建议一次定向搜索和一次候选正文读取，必要时按pagination继续读同一文档；失败后说明缺口，不重复相同搜索。"
             "source_candidates_found仅表示取得链接，source_read_analysis_pending表示已读但仍须核对日期、股本、业务和会计口径，不能写成已验证估值或正常化盈利。"

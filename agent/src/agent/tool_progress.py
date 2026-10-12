@@ -36,6 +36,7 @@ _NOTE_TEXT = {
     "cached": "was served from cache",
     "replayed": "was restored after context compaction",
     "compact": "was asked to compact the context",
+    "empty": "returned no search candidates",
 }
 
 
@@ -96,7 +97,14 @@ class ToolProgress:
             self._new_observation = True
             return
         try:
-            result = json.dumps(json.loads(result), sort_keys=True, ensure_ascii=False)
+            payload = json.loads(result)
+            # A changed query echoed in an empty search envelope is activity,
+            # not new evidence. Keep alternatives available, but do not let
+            # endless keyword variations reset the bounded analysis recovery.
+            if name == "web_search" and isinstance(payload, dict) and payload.get("results") == []:
+                self.note("empty", name)
+                return
+            result = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         except (ValueError, TypeError):
             pass
         observation = (

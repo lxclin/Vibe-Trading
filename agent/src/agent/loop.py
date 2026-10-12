@@ -1586,7 +1586,8 @@ class AgentLoop:
                     and self._grounding.identity_status == "locked"
                     and any(
                         record.symbol in self._grounding.primary_symbols
-                        for record in self._grounding._price_records()
+                        for record in self._grounding._comparable_price_records()
+                        if record.field in {"open", "high", "low", "close", "adj_close", "price"}
                     )
                     and not grounding_research_recovery
                     and self._tool_progress.stalled_iterations >= stall_threshold
@@ -1653,7 +1654,7 @@ class AgentLoop:
                             messages[0]["content"] = system_text[:start_at] + worksheet + system_text[end_at + len(end_marker):]
                         else:
                             messages[0]["content"] += worksheet
-                    response = self.llm.stream_chat(
+                    response = self._stream_chat_with_cost(trace, current_iter, "initial",
                         messages,
                         tools=tool_defs,
                         on_text_chunk=_on_text_chunk,
@@ -1719,7 +1720,7 @@ class AgentLoop:
                     self._cancel_event.wait(retry_delay_s)
                     if self._cancel_event.is_set():
                         break
-                    response = self.llm.stream_chat(
+                    response = self._stream_chat_with_cost(trace, current_iter, "retry",
                         messages,
                         tools=tool_defs,
                         on_text_chunk=_on_text_chunk,
@@ -2382,6 +2383,7 @@ class AgentLoop:
             )
             trace.write({"type": "end", "iter": self._run_iteration, "status": "error", "reason": str(exc), "iterations": iteration})
             trace.close()
+            self._save_research_cost(run_dir, trace.path, self._run_iteration - iteration + 1)
             state_store.mark_failure(run_dir, str(exc))
             self._run_done.set()
             return {
@@ -2469,6 +2471,7 @@ class AgentLoop:
             end_event["reason"] = final_reason
         trace.write(end_event)
         trace.close()
+        self._save_research_cost(run_dir, trace.path, self._run_iteration - iteration + 1)
 
         result: dict[str, Any] = {
             "status": final_status,
@@ -2506,6 +2509,26 @@ class AgentLoop:
             result["content_filter_warnings"] = cf_warnings
 
         return result
+
+    def _stream_chat_with_cost(self, trace, iteration, attempt, *args, **kwargs):
+        started = _time.monotonic()
+        response = None
+        try:
+            response = self.llm.stream_chat(*args, **kwargs)
+            return response
+        finally:
+            trace.write({"type": "llm_call_cost", "iter": iteration, "attempt": attempt,
+                         "status": "ok" if response is not None else "error",
+                         "elapsed_ms": round((_time.monotonic() - started) * 1000),
+                         "usage": _normalize_llm_usage(getattr(response, "usage_metadata", None))})
+
+    @staticmethod
+    def _save_research_cost(run_dir, trace_path, first_iteration):
+        from src.agent.research_cost import write_report
+        try:
+            write_report(run_dir, trace_path, first_iteration=first_iteration)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.debug("Research cost report skipped: %s", exc)
 
     def _stall_watchdog(
         self,
