@@ -1275,9 +1275,18 @@ class AgentLoop:
             cached_receipts = scoped_receipts(self._session_research_cache.items, self._grounding.authorized_symbols)
             self._grounding.ingest_research_handoff(cached_receipts, source_call_id="same_session_reuse")
 
+        from src.agent.grounding.followup_tools import holding_followup_guidance, holding_followup_tools
+        complete_tool_defs = definitions() if callable(definitions) else []
+        followup_tool_defs = holding_followup_tools(user_message, self._grounding, complete_tool_defs)
+        if followup_tool_defs is not None:
+            self._tool_schema_tokens = estimate_tokens(followup_tool_defs)
+
         context = ContextBuilder(self.registry, self.memory,
                                   persistent_memory=self._persistent_memory)
         goal_context, active_goal_id = get_current_goal_context(session_id) if session_id else ("", None)
+        if goal_context and followup_tool_defs is not None:
+            followup_tool_defs = None
+            self._tool_schema_tokens = estimate_tokens(complete_tool_defs)
         llm_user_message = user_message
         if goal_context:
             llm_user_message = (
@@ -1343,6 +1352,8 @@ class AgentLoop:
             )
             from src.agent.grounding.query_budget import dated_evidence_context
             messages[0]["content"] += dated_evidence_context(self._grounding)
+            if followup_tool_defs is not None:
+                messages[0]["content"] += holding_followup_guidance()
         if self._grounding._decision_required:
             messages[0]["content"] += "\n\n" + decision_guidance(
                 self._grounding._prefer_chinese,
@@ -1380,6 +1391,11 @@ class AgentLoop:
             trace.write({"type": "session_evidence_restored", "iter": self._run_iteration + 1,
                          "call_ids": sorted(self._grounding._imported_research_calls),
                          "fresh_fetch": False})
+        if followup_tool_defs is not None:
+            trace.write({"type": "research_tool_scope", "iter": self._run_iteration + 1,
+                         "full_tools": len(complete_tool_defs), "offered_tools": len(followup_tool_defs),
+                         "full_schema_chars": len(json.dumps(complete_tool_defs, ensure_ascii=False)),
+                         "offered_schema_chars": len(json.dumps(followup_tool_defs, ensure_ascii=False))})
         trace.write_text_entry(
             {"type": "message", "iter": self._run_iteration + 1, "role": "user"},
             field="content",
@@ -1632,7 +1648,7 @@ class AgentLoop:
                 tool_defs = (
                     None
                     if is_last_iteration or correction_text_only or stalled_market_analysis
-                    else self.registry.get_definitions()
+                    else followup_tool_defs if followup_tool_defs is not None else self.registry.get_definitions()
                 )
                 if is_last_iteration:
                     trace.write({"type": "forced_text_only", "iter": current_iter})
@@ -1857,6 +1873,19 @@ class AgentLoop:
                 consecutive_content_filter_count = 0
 
                 forced_grounding_release = False
+                if followup_tool_defs is not None and tool_defs is not None and response.has_tool_calls:
+                    offered = {item["function"]["name"] for item in followup_tool_defs}
+                    if any(call.name not in offered for call in response.tool_calls):
+                        # No unoffered side effect executes. Expand once and let
+                        # the provider issue a new, properly offered batch.
+                        followup_tool_defs = None
+                        self._tool_schema_tokens = estimate_tokens(complete_tool_defs)
+                        trace.write({"type": "research_tool_scope_expanded", "iter": current_iter})
+                        messages.append({"role": "user", "content":
+                            "<system>The last tool batch requested a tool outside the offered follow-up toolbox "
+                            "and was not executed. The full registry is now available. Reissue only calls "
+                            "needed for the user's existing request; all normal authorization checks still apply.</system>"})
+                        continue
                 if correction_text_only and response.has_tool_calls:
                     # An unoffered call consumes the same bounded correction
                     # budget as an invalid revised draft, but is never executed

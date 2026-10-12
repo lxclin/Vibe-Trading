@@ -55,7 +55,8 @@ def summarize(events, *, usage_rows=()):
                 except (TypeError, ValueError):
                     pass
         if kind in {"answer_rejected", "answer_repaired", "answer_derivation_omitted", "research_delivery_review",
-                    "tool_result_reused", "tool_result_cached", "tool_result_replayed", "session_evidence_restored"}:
+                    "tool_result_reused", "tool_result_cached", "tool_result_replayed", "session_evidence_restored",
+                    "research_tool_scope", "research_tool_scope_expanded"}:
             edits[kind] += 1
     # Historical traces lack model call events. Artifact usage covers only
     # successful reported calls; it cannot reconstruct failed calls or timing.
