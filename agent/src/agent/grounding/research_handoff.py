@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping
 
 RESEARCH_TOOLS = frozenset({
     "search_symbol", "get_a_share_valuation", "get_financial_statements",
-    "get_market_data", "financial_rigor", "web_search", "read_url",
+    "get_market_data", "financial_rigor", "web_search", "read_url", "etf_holdings",
 })
 MAX_RECEIPTS = 64
 MAX_RECEIPT_CHARS = 180000
@@ -34,7 +34,7 @@ def capture_receipt(
     scope = sorted(set(symbols))
     code = str(arguments.get("code") or "").upper()
     query = str(arguments.get("query") or "").upper()
-    if tool in {"get_a_share_valuation", "get_financial_statements"} and code in scope:
+    if tool in {"get_a_share_valuation", "get_financial_statements", "etf_holdings"} and code in scope:
         scope = [code]
     elif tool == "search_symbol" and query in scope:
         scope = [query]
@@ -84,7 +84,7 @@ def scoped_receipts(items: Any, authorized_symbols: set[str]) -> list[dict[str, 
                 or len(result) > MAX_RECEIPT_CHARS or not isinstance(item.get("success"), bool)):
             continue
         tool = item["tool"]
-        if tool in {"get_a_share_valuation", "get_financial_statements"}:
+        if tool in {"get_a_share_valuation", "get_financial_statements", "etf_holdings"}:
             if str(args.get("code") or "").upper() not in authorized_symbols:
                 continue
         elif tool == "search_symbol":

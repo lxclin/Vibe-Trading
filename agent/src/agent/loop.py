@@ -1251,7 +1251,19 @@ class AgentLoop:
             ),
         )
 
-        from src.agent.grounding.query_budget import SessionResearchCache
+        from src.agent.grounding.query_budget import SessionEvidenceStore, SessionResearchCache
+        session_path = (
+            SESSIONS_DIR / session_id
+            if session_id and re.fullmatch(r"[A-Za-z0-9_-]+", session_id) else None
+        )
+        self._session_evidence_store = SessionEvidenceStore(
+            session_path / "research_evidence.json" if session_path else None, now=run_started_wall,
+        )
+        if self._grounding.inherited_symbols and session_path:
+            self._session_evidence_store.recover_trace(session_path / "trace.jsonl")
+            self._grounding.ingest_research_handoff(
+                self._session_evidence_store.items, source_call_id="same_session_dated_evidence",
+            )
         self._session_research_cache = SessionResearchCache(
             SESSIONS_DIR / session_id / "research_cache.json" if session_id and re.fullmatch(r"[A-Za-z0-9_-]+", session_id) else None,
             now=run_started_wall,
@@ -1329,6 +1341,8 @@ class AgentLoop:
                 "peer or comparison instrument with search_symbol in a separate tool-call "
                 "turn before requesting its market or fundamental data."
             )
+            from src.agent.grounding.query_budget import dated_evidence_context
+            messages[0]["content"] += dated_evidence_context(self._grounding)
         if self._grounding._decision_required:
             messages[0]["content"] += "\n\n" + decision_guidance(
                 self._grounding._prefer_chinese,
@@ -1362,6 +1376,10 @@ class AgentLoop:
             value=user_message,
             offload_kind=f"start-{self._run_iteration + 1}",
         )
+        if self._grounding._imported_research_calls:
+            trace.write({"type": "session_evidence_restored", "iter": self._run_iteration + 1,
+                         "call_ids": sorted(self._grounding._imported_research_calls),
+                         "fresh_fetch": False})
         trace.write_text_entry(
             {"type": "message", "iter": self._run_iteration + 1, "role": "user"},
             field="content",
@@ -3740,6 +3758,9 @@ class AgentLoop:
             session_cache = getattr(self, "_session_research_cache", None)
             if success and update_memory and session_cache is not None:
                 session_cache.record(tc.name, tc.arguments, result, tc.id, self._grounding.authorized_symbols)
+            evidence_store = getattr(self, "_session_evidence_store", None)
+            if success and update_memory and evidence_store is not None:
+                evidence_store.record(tc.name, tc.arguments, result, tc.id, self._grounding.authorized_symbols)
             if tc.name == "search_symbol":
                 trace.write(
                     {

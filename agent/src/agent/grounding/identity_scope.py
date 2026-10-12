@@ -26,6 +26,10 @@ _BARE_LISTED_CODE_RE = re.compile(r"(?<![A-Za-z0-9_])\d{5,6}(?![A-Za-z0-9_])")
 _REFERENTIAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:请\s*)?(?:"
     r"继续|接着|继续分析|接着分析|进一步分析|再看看|再分析一下|"
+    r"我(?:应该|该)?怎么办|(?:那)?我(?:应该|该)?怎么做|"
+    r"(?:那你说)?(?:不能|不该|不要)(?:无条件)?躺平[，,]?我(?:应该|该)?怎么做"
+    r"(?:[，,]?什么时候卖出(?:降低成本)?)?|"
+    r"(?:那)?(?:什么时候|何时)(?:该)?(?:卖出|减仓)(?:降低成本)?|"
     r"同业(?:横向)?对比|同行(?:横向)?对比|横向对比|"
     r"(?:按|按照)?(?:短线|中线|长线)(?:给我|给出|制定)?(?:操作)?(?:方案|策略)?|"
     r"(?:后面|之后|接下来|下一步)(?:该)?(?:怎么|如何)(?:操作|处理|做)|"
@@ -270,6 +274,17 @@ class IdentityScopeMixin:
             # the only exception: it applies when the failed query is the
             # same symbol as an older lock and the user is managing a fill.
             if summary.get("status") != "locked":
+                # Older follow-ups could lose the subject entirely. Skip an
+                # empty audit only when its own preceding user turn is also a
+                # recognized referential follow-up, never a new subject.
+                preceding_user = next((
+                    prior for prior in reversed_history[position + 1:]
+                    if str(prior.get("role") or "").casefold() == "user"
+                ), None)
+                if (summary.get("status") in {"not_required", "unresolved"}
+                        and not summary.get("records") and preceding_user
+                        and _REFERENTIAL_FOLLOWUP_RE.fullmatch(str(preceding_user.get("content") or ""))):
+                    continue
                 # A retry of the same alternatives question may follow a
                 # failed peer lookup. Skip only that exact failed question;
                 # never walk through a genuine intervening subject change.
@@ -642,6 +657,12 @@ class IdentityScopeMixin:
         for candidate in candidates:
             by_symbol.setdefault(_normalize_symbol(candidate.get("symbol")), candidate)
         candidates = list(by_symbol.values())
+        # HK provider tickers are zero-padded; a qualified query already fixes
+        # the venue. Match its canonical form before comparing display names.
+        if _CANONICAL_SYMBOL_RE.fullmatch(query.strip()):
+            exact_symbol = by_symbol.get(_normalize_symbol(query))
+            if exact_symbol is not None:
+                return exact_symbol
         if len(candidates) == 1:
             return candidates[0]
         # A bare crypto name is not enough to select one venue-specific pair.
