@@ -667,8 +667,8 @@ def _run_worker_impl(
     artifact_dir = agent_artifact_dir(run_dir, agent_id, task_id)
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    # Inventory only: worker output contracts and the host's final release
-    # checks remain unchanged. Replay original receipts, never upstream prose.
+    # Replay original receipts, never upstream prose; accepted observations
+    # can support a synthesis deliverable without redundant data queries.
     research_ledger = GroundingLedger(
         run_dir=artifact_dir,
         user_message=user_prompt + "\nAssess whether to go long or short; 做多或做空研究。",
@@ -1027,6 +1027,7 @@ def _run_worker_impl(
                 is_data_agent=_is_data_agent(agent_spec),
                 report_written=_report_written(artifact_dir),
                 data_tool_calls=data_tool_calls,
+                inherited_evidence_used=_uses_inherited_evidence(summary, research_ledger),
             )
             if reason:
                 _emit(event_callback, "worker_incomplete", agent_id, task_id,
@@ -1188,6 +1189,7 @@ def _run_worker_impl(
         is_data_agent=_is_data_agent(agent_spec),
         report_written=_report_written(artifact_dir),
         data_tool_calls=data_tool_calls,
+        inherited_evidence_used=_uses_inherited_evidence(summary, research_ledger),
     )
     if reason:
         _emit(event_callback, "worker_incomplete", agent_id, task_id,
@@ -1400,12 +1402,28 @@ def _is_error_result(result: str) -> bool:
     return parsed.get("ok") is False or parsed.get("success") is False
 
 
+def _uses_inherited_evidence(summary: str, ledger: GroundingLedger | None) -> bool:
+    """Require substantive text citing an actually imported observation.
+
+    This checks the delivery contract only; host grounding still checks every
+    numeric claim. Upstream prose, failures and unreferenced receipts do not count.
+    """
+    if ledger is None or len(summary.strip()) < 600:
+        return False
+    from src.agent.grounding.figures import _normalize
+    rendered = _normalize(summary).text
+    return any(record.status == "observed" and record.value is not None
+               and record.call_id in ledger._imported_research_calls
+               and record.call_id in rendered for record in ledger._evidence)
+
+
 def _classify_deliverable(
     summary: str,
     *,
     is_data_agent: bool,
     report_written: bool,
     data_tool_calls: int,
+    inherited_evidence_used: bool = False,
 ) -> str | None:
     """Hybrid output contract. Return a short reason string when the worker
     did NOT produce a substantive deliverable, else ``None``.
@@ -1434,7 +1452,7 @@ def _classify_deliverable(
             "phase 2" in low and len(tail) < 80
         ):
             return "plan-only stub (no executed analysis / conclusion)"
-    if is_data_agent and not report_written and data_tool_calls == 0:
+    if is_data_agent and not report_written and data_tool_calls == 0 and not inherited_evidence_used:
         return "data agent produced no tool calls and no report.md"
     return None
 

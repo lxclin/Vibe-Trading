@@ -164,6 +164,8 @@ class GroundingLedger(
         """
         self.run_dir = Path(run_dir)
         self.user_message = user_message
+        from src.agent.grounding.decision import requested_horizon
+        self._requested_horizon = requested_horizon(user_message, history or ())
         self.resolution_context = ResolutionContext.from_messages(
             user_message,
             history,

@@ -19,6 +19,7 @@ import copy
 import json
 import logging
 import queue
+import re
 import sys
 import threading
 import time as _time
@@ -1250,6 +1251,18 @@ class AgentLoop:
             ),
         )
 
+        from src.agent.grounding.query_budget import SessionResearchCache
+        self._session_research_cache = SessionResearchCache(
+            SESSIONS_DIR / session_id / "research_cache.json" if session_id and re.fullmatch(r"[A-Za-z0-9_-]+", session_id) else None,
+            now=run_started_wall,
+            enabled=bool(re.search(r"复用|沿用|reuse", user_message, re.IGNORECASE)),
+        )
+
+        if self._session_research_cache.enabled:
+            from src.agent.grounding.research_handoff import scoped_receipts
+            cached_receipts = scoped_receipts(self._session_research_cache.items, self._grounding.authorized_symbols)
+            self._grounding.ingest_research_handoff(cached_receipts, source_call_id="same_session_reuse")
+
         context = ContextBuilder(self.registry, self.memory,
                                   persistent_memory=self._persistent_memory)
         goal_context, active_goal_id = get_current_goal_context(session_id) if session_id else ("", None)
@@ -1317,7 +1330,12 @@ class AgentLoop:
                 "turn before requesting its market or fundamental data."
             )
         if self._grounding._decision_required:
-            messages[0]["content"] += "\n\n" + decision_guidance(self._grounding._prefer_chinese)
+            messages[0]["content"] += "\n\n" + decision_guidance(
+                self._grounding._prefer_chinese,
+                fund=bool(self._grounding.primary_symbols) and all(
+                    re.fullmatch(r"(?:5\d{5}\.SH|1[568]\d{4}\.SZ)", symbol)
+                    for symbol in self._grounding.primary_symbols),
+            )
         if self._grounding._equity_research_required:
             messages[0]["content"] += "\n\n" + equity_research_guidance(self._grounding._prefer_chinese)
             if self._grounding._equity_research_question != user_message:
@@ -2673,6 +2691,24 @@ class AgentLoop:
                     )
                     continue
 
+            session_cache = getattr(self, "_session_research_cache", None)
+            reused = session_cache.lookup(tc.name, tc.arguments, self._grounding.authorized_symbols) if session_cache and self._grounding else None
+            if reused is not None:
+                from src.agent.grounding.query_budget import reused_result
+                self._grounding.ingest_research_handoff([reused], source_call_id="same_session_reuse")
+                payload = json.loads(reused_result(reused))
+                payload["_research_reuse"].update(
+                    fetched_at=reused["fetched_at"],
+                    instruction="Earlier same-session snapshot, not a fresh fetch. Keep original dates and cite original_call_id::field.",
+                )
+                messages.append(context.format_tool_result(tc.id, tc.name, truncate_tool_result(json.dumps(payload, ensure_ascii=False))))
+                trace.write({"type": "tool_result_reused", "tool": tc.name, "call_id": tc.id,
+                             "original_call_id": reused["call_id"], "fetched_at": reused["fetched_at"], "iter": iteration})
+                self._emit("tool_call", {"tool": tc.name, "arguments": redact_payload(tc.arguments), "call_id": tc.id, "iter": iteration})
+                self._emit("tool_result", {"tool": tc.name, "call_id": tc.id, "status": "ok", "cached": True,
+                                          "original_call_id": reused["call_id"], "elapsed_ms": 0})
+                continue
+
             # A successful readonly call whose visible result was removed by
             # micro/auto-compaction can be replayed from this run's memory. This
             # extends the existing deterministic-cache pattern without declaring
@@ -3650,6 +3686,9 @@ class AgentLoop:
                 call_id=tc.id,
                 success=success,
             )
+            session_cache = getattr(self, "_session_research_cache", None)
+            if success and update_memory and session_cache is not None:
+                session_cache.record(tc.name, tc.arguments, result, tc.id, self._grounding.authorized_symbols)
             if tc.name == "search_symbol":
                 trace.write(
                     {

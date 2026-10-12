@@ -56,6 +56,33 @@ from src.swarm.worker import agent_artifact_dir, clear_agent_artifacts, run_work
 logger = logging.getLogger(__name__)
 
 
+class _LayerCancelEvent(threading.Event):
+    """Link user cancellation while allowing a deadline to stop just this layer."""
+
+    def __init__(self, parent: threading.Event):
+        super().__init__()
+        self.parent = parent
+
+    def is_set(self) -> bool:
+        return super().is_set() or self.parent.is_set()
+
+    def set(self) -> None:
+        self.parent.set()
+        super().set()
+
+    def stop_layer(self) -> None:
+        super().set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not self.is_set():
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return self.is_set()
+            super().wait(0.05 if remaining is None else min(0.05, remaining))
+        return True
+
+
 def _worker_retry_delay_ceiling_s(retry_number: int) -> float:
     """Return the capped exponential ceiling for a one-based retry number."""
     if retry_number < 1:
@@ -923,6 +950,7 @@ class SwarmRuntime:
             Mapping of task_id -> WorkerResult for all tasks in this layer.
         """
         results: dict[str, WorkerResult] = {}
+        worker_cancel_event = _LayerCancelEvent(cancel_event)
 
         def _event_callback(event: SwarmEvent) -> None:
             self._emit_event(run.id, event)
@@ -930,7 +958,8 @@ class SwarmRuntime:
         # Manual executor lifecycle (not `with`) so KeyboardInterrupt and
         # the layer deadline don't block main on `shutdown(wait=True)` —
         # `wait=False + cancel_futures=True` lets pending work drop and
-        # the CLI return immediately. Running workers finish naturally.
+        # the CLI return immediately. Deadline cancellation also reaches active
+        # model streams and retry waits; already executing tools may finish.
         executor = ThreadPoolExecutor(max_workers=self._max_workers)
         futures: dict[Future[WorkerResult], str] = {}
         layer_budget = 0  # seconds — max per-task (retries × timeout) across layer
@@ -1023,7 +1052,7 @@ class SwarmRuntime:
                     include_shell_tools=include_shell_tools,
                     grounding_block=grounding_block,
                     research_receipts=list(run.research_receipts) if agent_spec.research_worksheet else None,
-                    cancel_event=cancel_event,
+                    cancel_event=worker_cancel_event,
                 )
                 futures[future] = tid
                 per_task_budget = (
@@ -1051,6 +1080,7 @@ class SwarmRuntime:
                             error=str(exc),
                         )
             except FuturesTimeoutError:
+                worker_cancel_event.stop_layer()
                 for pending, tid in futures.items():
                     if tid in results:
                         continue

@@ -29,7 +29,7 @@ _META_OR_COMPARISON_RE = re.compile(
 _STANCE_RE = re.compile(r"(?:研究)?结论(?:仍)?(?:为)?\s*[:：]\s*([^\n。；;]{1,100})", re.IGNORECASE)
 _ENGLISH_STANCE_RE = re.compile(r"\b(?:research )?(?:verdict|conclusion)\s*:\s*([^\n.;]{1,100})", re.IGNORECASE)
 _HORIZON_RE = re.compile(
-    r"(?:持有|分析|判断)?期限\s*[:：]\s*[*_`~\s]*(?:未来|短线|中线|长线|\d+\s*(?:[—–-]\s*\d+\s*)?(?:天|周|月|年))|"
+    r"(?:持有|分析|判断)?期限\s*[:：]\s*[*_`~\s]*(?:沿用\s*)?(?:未来|短线|中线|长线|半年|一年|\d+\s*(?:[—–-]\s*\d+\s*)?(?:天|周|个月|月|年))|"
     r"\b(?:horizon|timeframe)\s*:\s*(?:the requested|\d+|short|medium|long|six|one)",
     re.IGNORECASE,
 )
@@ -162,6 +162,22 @@ def decision_coverage(
     return coverage
 
 
+def requested_horizon(question: str, history: Sequence[Any] = ()) -> str | None:
+    """Read an explicit duration; inherit only for a referential follow-up."""
+    duration = re.compile(r"(?<![\d.])\d+\s*(?:[—–~～-]\s*\d+\s*)?(?:个月|月|周|天|年)|半年|一年|长期|短线")
+    found = duration.search(question)
+    if found:
+        return found.group(0)
+    if not re.search(r"沿用|刚才|上面|这个|那现在|现在能买吗", question):
+        return None
+    for message in reversed(list(history or [])[-24:]):
+        if isinstance(message, dict) and message.get("role") == "user":
+            found = duration.search(str(message.get("content") or ""))
+            if found:
+                return found.group(0)
+    return None
+
+
 def is_single_buy_question(question: str) -> bool:
     """Select a direct one-instrument entry question, excluding meta prompts."""
     # Bare mainland fund codes need the ETF workflow too, even when the user
@@ -173,8 +189,14 @@ def is_single_buy_question(question: str) -> bool:
     )
 
 
-def decision_guidance(chinese: bool) -> str:
+def decision_guidance(chinese: bool, *, fund: bool = False) -> str:
     """Tell the model the exact, auditable research-answer shape."""
+    if fund:
+        return (
+            "[基金入场研究] 沿用用户指定标的与期限，明确方向倾向、当前行动及依据。复用已取得的稳定证据，保留原日期和来源；报价按需要刷新。核对官方日净值或IOPV、折溢价、费用、跟踪及底层资产驱动。日净值不等于盘中IOPV，不要求公司财报、盈利或PE。缺关键价格或净值证据时说明研究未完成，不能自动看跌或等待。开头写结论：…；期限：…；信心：…，并列主要依据及改变判断的条件。"
+            if chinese else
+            "[Fund entry research] Preserve the requested instrument and horizon. Reuse dated stable evidence and refresh quotes when needed. Assess official NAV/IOPV, premium, fees, tracking and underlying drivers; daily NAV is not intraday IOPV. Do not require issuer earnings, cash flow or PE. State Verdict, Horizon, Confidence, Key evidence and What changes the view. Separate direction from entry action; missing evidence means research incomplete, not a bearish or wait verdict."
+        )
     if chinese:
         return (
             "[单一标的买入研究] 先确认标的和持有期限；用户未给期限时明确采用未来6—12个月作为分析假设。"
@@ -440,12 +462,19 @@ def decision_issues(
                 "decision_confidence_overstated",
                 "When multiple key valuation or earnings drivers are explicitly missing, use low confidence or obtain the missing evidence before claiming medium/high confidence.",
             )
+        fund = bool(re.fullmatch(r"(?:5\d{5}\.SH|1[568]\d{4}\.SZ)", symbol))
+        if fund:
+            has_financials = any(record.status == "observed" and record.symbol == symbol
+                                 and record.field == "web_financial.unit_nav"
+                                 and isinstance(record.value, (int, float)) and record.value > 0
+                                 for record in records)
         if not (has_price and has_financials):
             if stance != "incomplete":
                 issue(
                     "decision_evidence_insufficient",
-                    "Without both observed price and company financials in this run, choose 研究未完成 / research incomplete; incomplete research is not a market verdict.",
+                    ("Without observed price and official NAV for this fund, label the entry assessment 研究未完成 / research incomplete and name the fund-specific gap. Missing data is not a market verdict."
+                     if fund else "Without both observed price and company financials in this run, choose 研究未完成 / research incomplete; incomplete research is not a market verdict."),
                 )
             elif not _MISSING_RE.search(content):
-                issue("decision_missing_data_unspecified", "Name the missing price or financial data behind the incomplete research assessment.")
+                issue("decision_missing_data_unspecified", "Name the missing price, NAV/IOPV or trading-spread evidence for this fund." if fund else "Name the missing price or financial data behind the incomplete research assessment.")
     return issues

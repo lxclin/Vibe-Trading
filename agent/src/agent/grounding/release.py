@@ -87,7 +87,7 @@ _CORRECTION_REASONS = {
     "cited_as_observed": "it is presented as an observed value of this instrument",
     "unparseable_declaration": "the declaration line could not be read as `value | role | note | ref`",
     "symbol_never_handled": "no tool call in this session passed in or returned that symbol",
-    "additive_operand_not_observed": "a number its note adds or subtracts is not a value this session observed",
+    "additive_operand_not_observed": "a number its note adds or subtracts is not anchored to the referenced evidence. Check each input against its exact original call_id::field and report date; do not invent aliases, substitute periods or choose sources by matching numbers",
     "role_in_price_column": "it sits in a price column, which holds only observed prints",
     "proposed_not_a_price": "a proposed level is a price, not a percentage; state the price it implies",
     "symbol_mismatch": "it is declared for one instrument but the sentence writes it about another",
@@ -459,13 +459,16 @@ class _ReleaseMixin:
         is_zh = self._user_writes_chinese()
         if self._decision_required and self.identity_status == "locked" and self.primary_symbols:
             symbols = "、".join(sorted(self.primary_symbols))
+            horizon = self._requested_horizon or "未来六至十二个月（默认假设）"
+            fund = all(re.fullmatch(r"(?:5\d{5}\.SH|1[568]\d{4}\.SZ)", symbol) for symbol in self.primary_symbols)
+            evidence = "同期报价、官方净值、折溢价、费用及标的资产驱动" if fund else "同期行情、财报和估值依据"
             if is_zh:
                 return (
                     f"## 研究判断\n\n结论：研究未完成。标的：{symbols}。\n"
-                    "期限：按提问指定的期限；未指定时按未来六至十二个月评估。\n"
+                    f"期限：{horizon}。\n"
                     "信心：低。\n\n主要依据：本轮生成的买入分析没有通过数据核验，"
                     "目前缺少一份可供复核的完整结论，不能据此评价当前价格值得买入或应当等待。\n\n"
-                    "改变判断的条件：重新取得并核对同期行情、财报和估值依据后再评估。"
+                    f"改变判断的条件：补齐关键缺口并核对{evidence}后再评估。"
                 )
             return (
                 f"## Research view\n\nVerdict: research incomplete for {symbols}.\n"
@@ -765,7 +768,10 @@ class _ReleaseMixin:
         # so does a completed analysis: naming 600519.SH in a backtest request
         # makes it a market answer, but the backtest's own output is what the
         # surviving figures were checked against.
-        if self._identity_required and not self._price_records() and not self._analysis_completed:
+        if self._identity_required and not any(
+            record.field in {"open", "high", "low", "close", "adj_close", "price"}
+            for record in self._comparable_price_records()
+        ) and not self._analysis_completed:
             return None
         text = _strip_release_markers(content)
         # Stripping shifts offsets and the cuts anchor on issue spans, so the

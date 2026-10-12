@@ -56,6 +56,14 @@ _MAX_CONTAINER_REF_CANDIDATES = 5
 _MAX_CALL_REF_CANDIDATES = 5
 
 
+def _claim_report_dates(note: str) -> set[str]:
+    """Parse report-period metadata, never select evidence by numeric value."""
+    dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", note))
+    for year, period in re.findall(r"((?:19|20)\d{2})年?\s*(全年|年度|年报|上半年|中报|半年报)", note):
+        dates.add(year + ("-06-30" if period in {"上半年", "中报", "半年报"} else "-12-31"))
+    return dates
+
+
 def _is_report_eps(record: EvidenceRecord) -> bool:
     """Broker EPS is money per share, but must never become a traded price."""
     return record.tool == "get_research_reports" and bool(re.fullmatch(
@@ -67,7 +75,8 @@ _STATEMENT_MONEY_FIELDS = frozenset({
     "PARENTNETPROFIT", "PARENT_NETPROFIT", "NETPROFIT", "KCFJCXSYJLR", "DEDUCT_PARENT_NETPROFIT",
     "TOTALOPERATEREVE", "OPERATE_INCOME", "OPERATE_COST", "OPERATE_PROFIT", "NETCASH_OPERATE", "NETCASH_OPERATE_PK",
     "CONSTRUCT_LONG_ASSET", "INVEST_INCOME", "FAIRVALUE_CHANGE_INCOME", "ASSET_IMPAIRMENT_INCOME",
-    "CREDIT_IMPAIRMENT_INCOME", "MINORITY_INTEREST", "EPSJB", "BPS", "PER_NETASSET",
+    "CREDIT_IMPAIRMENT_INCOME", "CREDIT_IMPAIRMENT_LOSS", "ASSET_IMPAIRMENT_LOSS",
+    "MINORITY_INTEREST", "EPSJB", "BPS", "PER_NETASSET",
 })
 
 
@@ -580,7 +589,7 @@ class _PolicyMixin:
                 subjects = _scan_symbols(declaration.note)
                 if len(subjects) == 1:
                     subject = next(iter(subjects))
-                    dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
+                    dates = _claim_report_dates(declaration.note)
                     parts = re.split(r"([;,，；])", ref)
                     for index in range(0, len(parts), 2):
                         scope, separator, field = parts[index].strip().partition("::")
@@ -610,7 +619,7 @@ class _PolicyMixin:
                     scoped = self._referenced(candidate.ref, subject, None)
                     if scoped is not None:
                         records, metrics = scoped
-                        dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
+                        dates = _claim_report_dates(declaration.note)
                         if dates:
                             records = [record for record in records if record.timestamp
                                        and record.timestamp[:10] in dates]
@@ -659,7 +668,7 @@ class _PolicyMixin:
             # Financial bare fields can span multiple report periods. Require
             # an explicit ISO date in the declaration and one exact match;
             # announcement dates can coexist with the reporting date.
-            dates = set(re.findall(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", declaration.note))
+            dates = _claim_report_dates(declaration.note)
             if not separator or (scope == "get_financial_statements" and dates):
                 records = [
                     record for record in records
@@ -739,7 +748,7 @@ class _PolicyMixin:
             self._symbol_for_claim(line, symbol_records) for line, _ in positions
         ]
         declared_observed = {
-            declaration.value
+            (declaration.percent, declaration.value)
             for declaration in block.declarations
             if declaration.role == "observed"
         }
@@ -757,6 +766,35 @@ class _PolicyMixin:
             if figure.shape not in ("measured", "bare"):
                 continue
             declaration = block.match(figure.value, figure.percent, figure.digits)
+            if declaration is not None and declaration.role == "count" and figure.currency:
+                # A formula factor and a monetary fact can share digits (100
+                # versus 100亿美元). A count must not shadow a sourced amount.
+                monetary = replace(block, declarations=tuple(
+                    item for item in block.declarations if item.role != "count"))
+                declaration = monetary.match(figure.value, figure.percent, figure.digits) or declaration
+            # Unit-conversion literals are syntax only inside an inline formula
+            # identical to an evidence-anchored declared derivation. This never
+            # exempts a standalone price/percentage or an arbitrary operand.
+            if figure.value in {1, 100} and not figure.column:
+                formulas = list(re.finditer(r"`([^`\n]+)`", content))
+                formulas += list(re.finditer(r"(?m)^>\s*([0-9.,()+*/×✕÷−–%％ \t-]+)", content))
+                inline = next((match for match in formulas
+                               if match.start(1) <= figure.start < match.end(1)), None)
+                if inline is not None:
+                    expression = re.sub(r"100[%％]", "100", inline.group(1))
+                    evaluated = _evaluate_formula(expression)
+                    if evaluated is not None:
+                        formula_symbol = self._symbol_for_claim(content, records)
+                        for derived in block.declarations:
+                            formula = _formula_in_note(derived.note)
+                            if (derived.role == "derived" and formula is not None
+                                    and ast.dump(evaluated[2]) == ast.dump(formula[2])
+                                    and isinstance(self._derivation(derived, self._symbol_for_claim(derived.note, symbol_records) or formula_symbol, records), tuple)):
+                                break
+                        else:
+                            derived = None
+                        if derived is not None:
+                            continue
             if declaration is None:
                 line, line_offset = positions[figure.line]
                 local_start = max(0, figure.start - line_offset)
@@ -1885,6 +1923,18 @@ class _PolicyMixin:
                 values = [value for value in values if value not in blocked]
             if self._matches_evidence(figure, values, [] if money else values):
                 return []
+            # A uniquely named financial percentage has explicit units and
+            # written precision. Permit ordinary decimal rounding near zero
+            # without widening the policy for prices or pooled tool values.
+            if (declaration is not None and "::" in declaration.ref
+                    and len(scoped_records) == 1 and not metric_values
+                    and figure.percent and "." in figure.digits
+                    and scoped_records[0].tool == "get_financial_statements"
+                    and not _is_statement_money(scoped_records[0])):
+                target = float(scoped_records[0].value)
+                if ((target < 0) == (figure.value < 0)
+                        and abs(figure.value - target) <= _written_half_unit(figure.digits) * (1 + 1e-9)):
+                    return []
             if tail_risk:
                 return [
                     self._figure_issue(
@@ -2263,7 +2313,7 @@ class _PolicyMixin:
         figure: Figure,
         declaration: Declaration,
         symbol: str | None,
-        declared_observed: set[float],
+        declared_observed: set[tuple[bool, float]],
         line: str,
     ) -> list[dict[str, Any]]:
         """A cited figure names a source the reader can see and does not pose as a print.
@@ -2284,7 +2334,8 @@ class _PolicyMixin:
                     "is declared cited but names no source in its note",
                 )
             ]
-        if any(_close(figure.value, value) for value in declared_observed):
+        if any(percent == figure.percent and _close(figure.value, value)
+               for percent, value in declared_observed):
             return [
                 self._figure_issue(
                     "numeric_claim_conflict",

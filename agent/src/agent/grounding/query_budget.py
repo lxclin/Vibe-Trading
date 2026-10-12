@@ -70,3 +70,63 @@ def reused_result(receipt: dict[str, Any]) -> str:
         "original_call_id": receipt["call_id"],
         "instruction": "Same-run existing result, not a fresh fetch. Cite original_call_id::field. Keep original dates and source.",
     }}, ensure_ascii=False)
+
+
+class SessionResearchCache:
+    """Bounded original receipts for explicitly requested same-session reuse.
+
+    Thirty-minute retention is a snapshot policy, never a promise of freshness.
+    Quotes/bars/search identity are excluded. Existing authorization and normal
+    evidence ingestion still apply when a receipt is reused.
+    """
+    def __init__(self, path, *, now: float, enabled: bool):
+        from pathlib import Path
+        self.path = Path(path) if path is not None else None
+        self.now = now
+        self.enabled = enabled
+        self.items = []
+        if self.path is not None:
+            try:
+                if self.path.stat().st_size <= 1600000:
+                    packet = json.loads(self.path.read_text())
+                    self.items = [item for item in packet if isinstance(item, dict)
+                                  and isinstance(item.get("fetched_at"), (int, float))
+                                  and 0 <= now - item["fetched_at"] <= 1800][:64]
+            except (OSError, TypeError, ValueError):
+                self.items = []
+
+    def lookup(self, tool, arguments, symbols):
+        from src.agent.grounding.research_handoff import scoped_receipts
+        if not self.enabled or arguments.get("fresh") or arguments.get("no_cache"):
+            return None
+        key = query_key(tool, arguments)
+        return next((item for item in scoped_receipts(self.items, symbols)
+                     if item.get("success") is True and tool in REUSABLE_TOOLS
+                     and query_key(item["tool"], item["arguments"]) == key), None)
+
+    def record(self, tool, arguments, result, call_id, symbols):
+        from src.agent.grounding.research_handoff import capture_receipt, merge_receipts
+        if self.path is None or tool not in REUSABLE_TOOLS:
+            return
+        try:
+            payload = json.loads(result)
+        except (TypeError, ValueError):
+            return
+        if (not isinstance(payload, dict) or payload.get("ok") is False
+                or payload.get("success") is False or payload.get("status") == "error"
+                or payload.get("_research_reuse")
+                or (tool == "read_url" and isinstance(payload.get("web_financial"), dict)
+                    and "last_price" in payload["web_financial"])):
+            return
+        receipt = capture_receipt(tool, arguments, result, call_id, True, symbols)
+        if receipt is None:
+            return
+        receipt["fetched_at"] = self.now
+        self.items = merge_receipts([receipt], self.items)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(self.items, ensure_ascii=False))
+            temporary.replace(self.path)
+        except OSError:
+            pass  # Research can proceed if this optional cache cannot persist.

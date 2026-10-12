@@ -637,7 +637,7 @@ def _parse_value(
         rest = rest[1:].lstrip()
     unit, consumed = _percent_mark(rest, 0)
     tail = rest[consumed:].strip()
-    if not unit and tail in _MULTIPLE_MARKS:
+    if not unit and tail in (_MULTIPLE_MARKS | {"吨", "千克", "公斤", "克", "股", "份", "手"}):
         # "5.5x": a multiple, written the way the answer writes it.
         tail = ""
     if not (_is_currency_mark(tail) and _is_currency_mark(field[: token.start].strip())):

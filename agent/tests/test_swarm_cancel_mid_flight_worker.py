@@ -86,7 +86,39 @@ def test_run_worker_receives_cancel_event_kwarg(tmp_path, monkeypatch):
 
     runtime._execute_run(run, cancel_event)
 
-    assert received["cancel_event"] is cancel_event
+    assert received["cancel_event"].parent is cancel_event
+
+
+def test_layer_deadline_stops_running_worker_without_cancelling_run(tmp_path, monkeypatch):
+    from src.swarm.task_store import TaskStore
+
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def waiting_worker(agent_spec, task, **kwargs):
+        started.set()
+        if kwargs["cancel_event"].wait(2):
+            stopped.set()
+            return WorkerResult(status="cancelled", summary="deadline stopped stream")
+        return WorkerResult(status="failed", summary="worker kept running")
+
+    def expired_layer(futures, timeout=None):
+        assert started.wait(1)
+        raise rt.FuturesTimeoutError()
+
+    monkeypatch.setattr(rt, "run_worker", waiting_worker)
+    monkeypatch.setattr(rt, "as_completed", expired_layer)
+    store, runtime, run = _make_run(tmp_path)
+    parent = threading.Event()
+    tasks = TaskStore(store.run_dir(run.id))
+    tasks.save_task(run.tasks[0])
+    results = runtime._execute_layer(
+        run, tasks, {a.id: a for a in run.agents},
+        ["t1"], {}, store.run_dir(run.id), parent,
+    )
+    assert results["t1"].status == "timeout"
+    assert stopped.wait(0.5), "timed-out worker continued waiting on its model stream"
+    assert not parent.is_set(), "a deadline must not masquerade as user cancellation"
 
 
 def test_cancelled_worker_result_persists_as_cancelled_task(tmp_path, monkeypatch):
