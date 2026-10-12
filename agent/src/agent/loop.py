@@ -2733,7 +2733,7 @@ class AgentLoop:
                     fetched_at=reused["fetched_at"],
                     instruction="Earlier same-session snapshot, not a fresh fetch. Keep original dates and cite original_call_id::field.",
                 )
-                messages.append(context.format_tool_result(tc.id, tc.name, truncate_tool_result(json.dumps(payload, ensure_ascii=False))))
+                messages.append(context.format_tool_result(tc.id, tc.name, self._research_context_result(tc.name, json.dumps(payload, ensure_ascii=False), tc.id)))
                 trace.write({"type": "tool_result_reused", "tool": tc.name, "call_id": tc.id,
                              "original_call_id": reused["call_id"], "fetched_at": reused["fetched_at"], "iter": iteration})
                 self._emit("tool_call", {"tool": tc.name, "arguments": redact_payload(tc.arguments), "call_id": tc.id, "iter": iteration})
@@ -2755,9 +2755,12 @@ class AgentLoop:
             ):
                 cached = self._readonly_replay_cache[dedup_key]
                 restored = _replay_context_result(cached)
+                original_call = next((call for call, key in self._successful_call_keys.items()
+                                      if key == dedup_key), tc.id)
                 messages.append(
                     context.format_tool_result(
-                        tc.id, tc.name, truncate_tool_result(restored)
+                        tc.id, tc.name, self._research_context_result(
+                            tc.name, restored, tc.id, original_call_id=original_call)
                     )
                 )
                 self._readonly_replay_visibility_pending.add(tc.id)
@@ -2829,7 +2832,7 @@ class AgentLoop:
                                                "preview": "Reused existing research data; original references and dates retained."})
                     trace.write({"type": "tool_result_reused", "tool": tc.name, "call_id": tc.id,
                                  "original_call_id": original_call, "iter": iteration})
-                messages.append(context.format_tool_result(tc.id, tc.name, truncate_tool_result(skip_msg)))
+                messages.append(context.format_tool_result(tc.id, tc.name, self._research_context_result(tc.name, skip_msg, tc.id)))
                 trace.write({"type": "tool_skipped", "iter": iteration, "tool": tc.name})
                 self._tool_progress.note("skipped", tc.name)
                 react_trace.append({"type": "tool_skipped", "tool": tc.name})
@@ -3656,6 +3659,14 @@ class AgentLoop:
             return None
         return (tool_name, canonical)
 
+    def _research_context_result(self, tool, result, call_id, *, original_call_id=None):
+        if (tool == "get_financial_statements" and self.memory.run_dir
+                and self._grounding is not None and self._grounding._equity_research_required):
+            from src.agent.research_context import compact_financial_result
+            result = compact_financial_result(redact_tool_result(result),
+                                               run_dir=Path(self.memory.run_dir), call_id=original_call_id or call_id)
+        return truncate_tool_result(result)
+
     def _finalize_tool_result(
         self,
         tc: Any,
@@ -3766,7 +3777,7 @@ class AgentLoop:
 
             truncated = truncate_tool_result(swarm_context_result(result), limit=26000)
         else:
-            truncated = truncate_tool_result(result)
+            truncated = self._research_context_result(tc.name, result, tc.id)
         messages.append(context.format_tool_result(tc.id, tc.name, truncated))
 
         # One redaction feeds every subscriber below: the persisted trace
