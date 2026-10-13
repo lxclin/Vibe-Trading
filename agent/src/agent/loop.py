@@ -1277,7 +1277,7 @@ class AgentLoop:
 
         from src.agent.grounding.followup_tools import (
             holding_constraints, holding_delivery_review, holding_followup_guidance,
-            holding_followup_tools, is_holding_followup,
+            holding_followup_tools, holding_research_gaps, holding_research_guidance, is_holding_followup,
         )
         holding_followup = is_holding_followup(user_message, self._grounding)
         known_holding_constraints = holding_constraints(history, self._grounding.inherited_symbols) if holding_followup else {}
@@ -1359,6 +1359,7 @@ class AgentLoop:
             messages[0]["content"] += dated_evidence_context(self._grounding)
             if holding_followup:
                 messages[0]["content"] += holding_followup_guidance()
+                messages[0]["content"] += holding_research_guidance()
                 if known_holding_constraints:
                     messages[0]["content"] += "\nUser-stated constraints: " + json.dumps(known_holding_constraints, ensure_ascii=False)
         if self._grounding._decision_required:
@@ -1420,6 +1421,7 @@ class AgentLoop:
         consecutive_empty_responses = 0
         grounding_revisions = 0
         research_delivery_reviewed = False
+        holding_evidence_reviewed = False
         # A normal grounding correction is a text revision, not a new research
         # turn. Explicit grounding recovery (identity / missing price evidence)
         # keeps tools available; ordinary correction turns do not.
@@ -2078,6 +2080,22 @@ class AgentLoop:
                                 final_content = localized
                                 validation = self._grounding.revalidate(localized)
                         if validation.valid:
+                            gaps = holding_research_gaps(user_message, final_content) if holding_followup else []
+                            if (gaps and not holding_evidence_reviewed and not research_delivery_reviewed
+                                    and not forced_grounding_release and not correction_text_only
+                                    and tool_defs is not None
+                                    and iteration + 2 < self.max_iterations
+                                    and any(item.get("function", {}).get("name") in
+                                            {"get_financial_statements", "web_search", "read_url"}
+                                            for item in (followup_tool_defs or complete_tool_defs))):
+                                holding_evidence_reviewed = True
+                                trace.write({"type": "holding_evidence_review", "iter": current_iter, "gaps": gaps})
+                                if not buffer_text_output and streamed_chars:
+                                    self._emit("stream_reset", {"iter": current_iter, "reason": "holding_evidence_review"})
+                                messages.append({"role": "assistant", "content": final_content})
+                                messages.append({"role": "system", "content": holding_research_guidance(gaps)})
+                                final_content = ""
+                                continue
                             if delivery_requests:
                                 research_delivery_reviewed = True
                                 pending_delivery_draft = final_content

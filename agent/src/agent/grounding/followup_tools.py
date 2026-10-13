@@ -104,6 +104,54 @@ def holding_delivery_review(content, known=None):
     return requests
 
 
+def holding_research_gaps(question, content):
+    """Flag self-disclosed decision gaps, never infer that evidence is absent."""
+    if (not holding_context_subject(question)
+            or not re.search(r"估值|盈利|现金流|财报|研究证据", question)
+            or re.search(r"不要(?:再)?(?:查询|补查|联网)|无需(?:查询|补查|联网)|"
+                         r"仅(?:用|基于|根据|使用).{0,12}(?:已有|现有|历史)|只(?:用|基于).{0,12}(?:已有|现有)", question)):
+        return []
+    text = re.sub(r"```.*?```", "", content, flags=re.S)
+    # Include immediately following bullets for "仍缺少：" declarations.
+    text = re.sub(r"((?:缺少|缺乏|尚缺)[^\n。]{0,20}[：:])\n\s*((?:[-*] [^\n]+\n?){1,6})",
+                  lambda m: m.group(0).replace("\n", " "), text)
+    units = re.split(r"[。！？!?\n]", text)
+    missing = r"缺少|缺乏|缺口|不足|尚未.{0,12}(?:核验|验证|取得)|未.{0,6}(?:核验|取得)|无法核验"
+    topics = {"valuation": r"估值|市盈率|市净率", "earnings": r"盈利|利润|财报",
+              "cash_flow": r"现金流"}
+    return [topic for topic, pattern in topics.items()
+            if any(re.search(pattern, unit) and re.search(missing, unit)
+                   and not re.search(r"不缺少|并不缺乏|没有缺口|无缺口", unit) for unit in units)]
+
+
+def holding_research_guidance(gaps=None):
+    return (
+        "\n\n[HOLDING EVIDENCE REVIEW] Accuracy and decision-relevant evidence take priority over token savings. "
+        "Separate account-risk management from the asset's current investment merits. Audit both supporting "
+        "and opposing evidence, dates, reporting periods and valuation denominators. Original receipts can be "
+        "evidence; a search snippet or a visited page is only a lead until the relevant source content is checked. "
+        "Do not assume missing entries in the bounded inventory mean no evidence exists: read original artifacts "
+        "before abandoning usable research. Identify which unresolved input could actually reverse the leaning. "
+        "When market evidence is requested, prioritize retrieving those material gaps rather than ending with "
+        "only generic risk advice. For funds, verify the tracked index and dated holdings before choosing material "
+        "constituents; do not substitute one company's valuation for the fund or imply full index coverage. "
+        "Use available financial tools or official issuer/index/fund reports, resolve new instruments before "
+        "requesting their data, and batch independent reads. Different periods, accounting adjustments and "
+        "currencies require reconciliation before comparisons or valuation calculations. Seek disconfirming "
+        "evidence, not only sources agreeing with the prior conclusion. Necessary research may use additional "
+        "calls; avoid repeated failed queries, irrelevant breadth and unsupported precision. "
+        "Respect explicit user restrictions on retrieval; when told to use existing materials only, "
+        "do not fetch and disclose the resulting limits. "
+        "If retrieval is unavailable or the gap cannot change the immediate risk action, explain why and "
+        "give a conditional conclusion with appropriately limited confidence. No invented figures, buy/sell "
+        "prices or confidence upgrades. A retrieval attempt does not establish accuracy or completeness."
+        + ("\nThe draft itself disclosed these gaps: " + ", ".join(gaps)
+           + ". Reassess them using existing evidence first, then retrieve what materially affects the answer. "
+             "Tools are available for this research pass; this is not a text-only editorial correction."
+           if gaps else "")
+    )
+
+
 def holding_followup_guidance():
     return (
         "\n\n[HOLDING FOLLOW-UP] Address the immediate holding-management question first. "
