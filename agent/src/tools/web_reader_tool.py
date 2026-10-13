@@ -13,6 +13,7 @@ from src.agent.progress import emit_progress
 from src.agent.tools import BaseTool
 from src.security.scanner import with_security_warnings
 from src.tools.public_financial_snapshot import public_financial_snapshot
+from src.tools.web_reader_status import target_page_failure
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,15 @@ def read_url(url: str, no_cache: bool = False, offset: int = 0, max_chars: int =
             if line.startswith("Title:"):
                 title = line[6:].strip()
                 break
+
+        failure = target_page_failure(title, text)
+        if failure:
+            origin_status, reason = failure
+            return json.dumps({"status": "error", "error_code": reason, "url": target_url,
+                               "title": title, "target_status": origin_status,
+                               "error": "The target returned an error or unavailable page; reader HTTP 200 "
+                                        "does not establish a successful source read. Locate a valid source "
+                                        "from published links; do not use this page as financial evidence."}, ensure_ascii=False)
 
         total_length = len(text)
         if offset > total_length:

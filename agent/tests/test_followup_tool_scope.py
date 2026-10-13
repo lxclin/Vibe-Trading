@@ -82,13 +82,19 @@ def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkey
     assert [d["function"]["name"] for d in llm.tools_history[0]] == ["get_a_share_valuation"]
     assert "[HOLDING FOLLOW-UP]" in llm.messages_history[0][0]["content"]
     assert "do not ask again" in llm.messages_history[0][0]["content"]
+    assert "[ORIGINAL RESEARCH SOURCES]" in llm.messages_history[0][0]["content"]
+    if long_context:
+        assert "[PRE-ANSWER RESEARCH PLAN]" in llm.messages_history[0][0]["content"]
     trace = TraceWriter.read(tmp_path / "followup")
     if long_context:
         assert any(e["type"] == "session_evidence_restored" for e in trace)
+        assert any(e["type"] == "holding_research_preflight" for e in trace)
     scope = next(e for e in trace if e["type"] == "research_tool_scope")
     assert scope["offered_schema_chars"] < scope["full_schema_chars"]
     costs = json.loads((run / "research_cost.json").read_text())
     assert costs["events"]["research_tool_scope"] == 1
+    if long_context:
+        assert costs["events"]["holding_research_preflight"] == 1
     if expand:
         assert llm.calls == 2
         assert {d["function"]["name"] for d in llm.tools_history[1]} == {"get_a_share_valuation", "write_file"}

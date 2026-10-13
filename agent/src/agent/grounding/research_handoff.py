@@ -103,6 +103,10 @@ def scoped_receipts(items: Any, authorized_symbols: set[str]) -> list[dict[str, 
             continue
         if not isinstance(payload, dict):
             continue
+        if tool == "read_url":
+            from src.tools.web_reader_status import target_page_failure
+            if target_page_failure(str(payload.get("title") or ""), str(payload.get("content") or "")):
+                continue
         failed = payload.get("ok") is False or payload.get("success") is False or payload.get("status") == "error"
         if item["success"] and failed:
             continue

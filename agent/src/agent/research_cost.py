@@ -57,6 +57,7 @@ def summarize(events, *, usage_rows=()):
         if kind in {"answer_rejected", "answer_repaired", "answer_derivation_omitted", "research_delivery_review",
                     "research_delivery_revision_discarded",
                     "holding_evidence_review",
+                    "holding_research_preflight",
                     "tool_result_reused", "tool_result_cached", "tool_result_replayed", "session_evidence_restored",
                     "research_tool_scope", "research_tool_scope_expanded"}:
             edits[kind] += 1

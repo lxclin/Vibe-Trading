@@ -104,12 +104,35 @@ def holding_delivery_review(content, known=None):
     return requests
 
 
+def holding_research_allowed(question):
+    return bool(holding_context_subject(question)
+                and re.search(r"估值|盈利|现金流|财报|研究证据", question)
+                and not re.search(r"不要(?:再)?(?:查询|补查|联网)|无需(?:查询|补查|联网)|"
+                                  r"仅(?:用|基于|根据|使用).{0,12}(?:已有|现有|历史)|只(?:用|基于).{0,12}(?:已有|现有)", question))
+
+
+def holding_research_preflight():
+    return (
+        "\n\n[PRE-ANSWER RESEARCH PLAN] Before composing a complete answer, assess the decision-critical "
+        "evidence, not just the available quote. First use the dated inventory and original-source index "
+        "to classify relevant materials as usable, stale, source candidates, unavailable or unchecked; "
+        "retrieval success alone is not verification. Identify the input most likely to change the leaning "
+        "(valuation basis, earnings quality or cash conversion) and what opposing evidence to check. "
+        "Retrieve material unresolved inputs BEFORE writing a full report; do not spend a round drafting "
+        "a generic complete answer merely to announce those gaps. Reuse exact source paths; do not list "
+        "the current run directory to search for historical receipts. For funds, identify the tracked "
+        "index and dated holdings, then choose material constituents rather than treating their findings "
+        "as full fund coverage. Discover source URLs from actual search results or published page links; "
+        "do not guess index detail paths. Batch independent reads and follow dependent links in order. "
+        "If evidence is sufficient, retrieval is unavailable, or a gap cannot affect the immediate action, "
+        "explain that boundary and answer without ceremonial fetching. This is a planning aid, not a "
+        "mandatory fixed query count, proof of completeness or reason to invent data."
+    )
+
+
 def holding_research_gaps(question, content):
     """Flag self-disclosed decision gaps, never infer that evidence is absent."""
-    if (not holding_context_subject(question)
-            or not re.search(r"估值|盈利|现金流|财报|研究证据", question)
-            or re.search(r"不要(?:再)?(?:查询|补查|联网)|无需(?:查询|补查|联网)|"
-                         r"仅(?:用|基于|根据|使用).{0,12}(?:已有|现有|历史)|只(?:用|基于).{0,12}(?:已有|现有)", question)):
+    if not holding_research_allowed(question):
         return []
     text = re.sub(r"```.*?```", "", content, flags=re.S)
     # Include immediately following bullets for "仍缺少：" declarations.

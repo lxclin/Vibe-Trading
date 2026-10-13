@@ -1277,9 +1277,11 @@ class AgentLoop:
 
         from src.agent.grounding.followup_tools import (
             holding_constraints, holding_delivery_review, holding_followup_guidance,
-            holding_followup_tools, holding_research_gaps, holding_research_guidance, is_holding_followup,
+            holding_followup_tools, holding_research_allowed, holding_research_gaps,
+            holding_research_guidance, holding_research_preflight, is_holding_followup,
         )
         holding_followup = is_holding_followup(user_message, self._grounding)
+        holding_preflight_enabled = holding_followup and holding_research_allowed(user_message)
         from src.agent.grounding.holding_arguments import holding_argument_guidance, holding_argument_review
         known_holding_constraints = holding_constraints(history, self._grounding.inherited_symbols) if holding_followup else {}
         complete_tool_defs = definitions() if callable(definitions) else []
@@ -1359,9 +1361,13 @@ class AgentLoop:
             from src.agent.grounding.query_budget import dated_evidence_context
             messages[0]["content"] += dated_evidence_context(self._grounding)
             if holding_followup:
+                from src.agent.grounding.research_sources import research_source_context
+                messages[0]["content"] += research_source_context(self._grounding, self._session_evidence_store.items, run_dir)
                 messages[0]["content"] += holding_followup_guidance()
                 messages[0]["content"] += holding_research_guidance()
                 messages[0]["content"] += holding_argument_guidance()
+                if holding_preflight_enabled:
+                    messages[0]["content"] += holding_research_preflight()
                 if known_holding_constraints:
                     messages[0]["content"] += "\nUser-stated constraints: " + json.dumps(known_holding_constraints, ensure_ascii=False)
         if self._grounding._decision_required:
@@ -1401,6 +1407,9 @@ class AgentLoop:
             trace.write({"type": "session_evidence_restored", "iter": self._run_iteration + 1,
                          "call_ids": sorted(self._grounding._imported_research_calls),
                          "fresh_fetch": False})
+        if holding_preflight_enabled:
+            trace.write({"type": "holding_research_preflight", "iter": self._run_iteration + 1,
+                         "boundary": "Planning guidance, not executed retrieval or evidence sufficiency."})
         if followup_tool_defs is not None:
             trace.write({"type": "research_tool_scope", "iter": self._run_iteration + 1,
                          "full_tools": len(complete_tool_defs), "offered_tools": len(followup_tool_defs),

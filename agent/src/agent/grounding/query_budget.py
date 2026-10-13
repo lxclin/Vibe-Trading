@@ -164,6 +164,10 @@ class SessionEvidenceStore(SessionResearchCache):
                 or payload.get("success") is False or payload.get("status") == "error"
                 or payload.get("_research_reuse")):
             return None
+        if tool == "read_url":
+            from src.tools.web_reader_status import target_page_failure
+            if target_page_failure(str(payload.get("title") or ""), str(payload.get("content") or "")):
+                return None
         receipt = capture_receipt(tool, arguments, result, call_id, True, symbols)
         if receipt is None:
             return None
