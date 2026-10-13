@@ -1275,7 +1275,12 @@ class AgentLoop:
             cached_receipts = scoped_receipts(self._session_research_cache.items, self._grounding.authorized_symbols)
             self._grounding.ingest_research_handoff(cached_receipts, source_call_id="same_session_reuse")
 
-        from src.agent.grounding.followup_tools import holding_followup_guidance, holding_followup_tools
+        from src.agent.grounding.followup_tools import (
+            holding_constraints, holding_delivery_review, holding_followup_guidance,
+            holding_followup_tools, is_holding_followup,
+        )
+        holding_followup = is_holding_followup(user_message, self._grounding)
+        known_holding_constraints = holding_constraints(history, self._grounding.inherited_symbols) if holding_followup else {}
         complete_tool_defs = definitions() if callable(definitions) else []
         followup_tool_defs = holding_followup_tools(user_message, self._grounding, complete_tool_defs)
         if followup_tool_defs is not None:
@@ -1352,8 +1357,10 @@ class AgentLoop:
             )
             from src.agent.grounding.query_budget import dated_evidence_context
             messages[0]["content"] += dated_evidence_context(self._grounding)
-            if followup_tool_defs is not None:
+            if holding_followup:
                 messages[0]["content"] += holding_followup_guidance()
+                if known_holding_constraints:
+                    messages[0]["content"] += "\nUser-stated constraints: " + json.dumps(known_holding_constraints, ensure_ascii=False)
         if self._grounding._decision_required:
             messages[0]["content"] += "\n\n" + decision_guidance(
                 self._grounding._prefer_chinese,
@@ -1419,6 +1426,7 @@ class AgentLoop:
         grounding_correction_text_only = False
         grounding_research_recovery = False
         pending_grounding_draft = ""
+        pending_delivery_draft = ""
         llm_usage_summary = _new_llm_usage_summary(self.llm)
         last_response_model: str | None = None
         goal_continuations = 0
@@ -1886,7 +1894,18 @@ class AgentLoop:
                             "and was not executed. The full registry is now available. Reissue only calls "
                             "needed for the user's existing request; all normal authorization checks still apply.</system>"})
                         continue
-                if correction_text_only and response.has_tool_calls:
+                if (correction_text_only and pending_delivery_draft
+                        and (response.has_tool_calls or not (response.content or "").strip()
+                             or _looks_like_tool_call_syntax(response.content or ""))):
+                    # Presentation gets one attempt. Preserve the previously
+                    # validated answer if the provider ignores the text-only
+                    # request; the original still passes the complete gate.
+                    forced_grounding_release = True
+                    pending_grounding_draft = pending_delivery_draft
+                    trace.write({"type": "research_delivery_revision_discarded", "iter": current_iter,
+                                 "reason": ("tool_call" if response.has_tool_calls else
+                                            "empty_response" if not (response.content or "").strip() else "tool_syntax")})
+                if correction_text_only and response.has_tool_calls and not forced_grounding_release:
                     # An unoffered call consumes the same bounded correction
                     # budget as an invalid revised draft, but is never executed
                     # or inserted into the transcript as an unanswered tool call.
@@ -2005,17 +2024,28 @@ class AgentLoop:
                         syntax_fallback_emitted = True
                     delivery_requests = []
                     if (self._grounding is not None
+                            and not holding_followup
                             and getattr(self._grounding, "_equity_research_required", False)
                             and not research_delivery_reviewed and not forced_grounding_release
                             and iteration + 1 < self.max_iterations
                             and self._grounding.equity_research_worksheet().get("companies")):
                         delivery_requests = delivery_review(final_content)
+                    if (holding_followup and not research_delivery_reviewed and not forced_grounding_release
+                            and iteration + 1 < self.max_iterations):
+                        delivery_requests.extend(holding_delivery_review(final_content, known_holding_constraints))
                     if self._grounding is not None:
                         validation = (
                             self._grounding.revalidate(final_content)
                             if forced_grounding_release
                             else self._grounding.validate_final_answer(final_content)
                         )
+                        if not validation.valid and pending_delivery_draft and not forced_grounding_release:
+                            original_validation = self._grounding.revalidate(pending_delivery_draft)
+                            if original_validation.valid:
+                                trace.write({"type": "research_delivery_revision_discarded", "iter": current_iter,
+                                             "reason": "grounding_failed", "issues": validation.issues})
+                                final_content = pending_delivery_draft
+                                validation = original_validation
                         if not validation.valid:
                             # Repair unique exact-field citations or provenance
                             # metadata without changing numeric claims. Every
@@ -2050,6 +2080,7 @@ class AgentLoop:
                         if validation.valid:
                             if delivery_requests:
                                 research_delivery_reviewed = True
+                                pending_delivery_draft = final_content
                                 if not buffer_text_output and streamed_chars:
                                     self._emit("stream_reset", {"iter": current_iter, "reason": "research_delivery_review"})
                                 trace.write({"type": "research_delivery_review", "iter": current_iter, "requests": delivery_requests})
@@ -2250,6 +2281,7 @@ class AgentLoop:
                     # research turn and must regain its normal tool access.
                     grounding_correction_text_only = False
                     pending_grounding_draft = ""
+                    pending_delivery_draft = ""
                     should_continue_goal = False
                     continuation_snapshot = None
                     _max_cont = _goal_max_continuations()

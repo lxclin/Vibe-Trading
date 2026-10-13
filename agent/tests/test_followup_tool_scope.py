@@ -39,6 +39,7 @@ def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkey
     from src.agent.trace import TraceWriter
     from tests.test_grounding_release import _Response, _ScriptedLLM, _tool_call
     from tests.test_session_dated_evidence import _quote
+    from tests.test_holding_delivery import COMPLETE
 
     saved = json.loads((Path(__file__).parent / "fixtures/research_20261012/etf_identity.json").read_text())
     call, result = _quote(saved)
@@ -62,7 +63,7 @@ def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkey
     quote, write = Tool("get_a_share_valuation"), Tool("write_file")
     registry.register(quote)
     registry.register(write)
-    responses = [_Response(content="513330.SH（腾讯，CNY）历史快照价格0.338元；不是当前实时价格。")]
+    responses = [_Response(content=COMPLETE + "513330.SH（腾讯，CNY）历史快照价格0.338元；不是当前实时价格。")]
     if expand:
         responses.insert(0, _Response(tool_calls=[_tool_call("not-offered", "write_file", path="unused.md")]))
     llm = _ScriptedLLM(responses)

@@ -120,6 +120,7 @@ def test_followup_loop_gets_tool_evidence_without_new_fetch(tmp_path, saved, mon
     from src.agent.loop import AgentLoop
     from src.agent.tools import ToolRegistry
     from tests.test_grounding_release import _Response, _ScriptedLLM
+    from tests.test_holding_delivery import COMPLETE
 
     monkeypatch.setattr("src.agent.loop.SESSIONS_DIR", tmp_path)
     session = tmp_path / "followup"
@@ -127,7 +128,7 @@ def test_followup_loop_gets_tool_evidence_without_new_fetch(tmp_path, saved, mon
     (session / "trace.jsonl").write_text("\n".join(json.dumps(e) for e in saved["events"]) + "\n")
     _, result = _quote(saved)
     monkeypatch.setattr("time.time", lambda: result["ts"] + 7200)
-    llm = _ScriptedLLM([_Response(content="513330.SH（腾讯，CNY）历史快照价格0.338元；不是当前实时价格。")])
+    llm = _ScriptedLLM([_Response(content=COMPLETE + "513330.SH（腾讯，CNY）历史快照价格0.338元；不是当前实时价格。")])
     agent = AgentLoop(registry=ToolRegistry(), llm=llm, max_iterations=3)
     run = tmp_path / "run"
     run.mkdir()
