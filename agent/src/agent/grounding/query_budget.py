@@ -142,22 +142,35 @@ class SessionEvidenceStore(SessionResearchCache):
         super().__init__(path, now=now, enabled=False, retention_seconds=7 * 86400)
 
     def record(self, tool, arguments, result, call_id, symbols):
-        from src.agent.grounding.research_handoff import capture_receipt, merge_receipts
-        if self.path is None or tool == "search_symbol":
+        from src.agent.grounding.research_handoff import merge_receipts
+        if self.path is None:
             return
+        receipt = self._original_receipt(tool, arguments, result, call_id, symbols, self.now)
+        if receipt is None:
+            return
+        self.items = merge_receipts([receipt], self.items)
+        self._save()
+
+    @staticmethod
+    def _original_receipt(tool, arguments, result, call_id, symbols, fetched_at):
+        from src.agent.grounding.research_handoff import capture_receipt
+        if tool == "search_symbol":
+            return None
         try:
             payload = json.loads(result)
         except (TypeError, ValueError):
-            return
+            return None
         if (not isinstance(payload, dict) or payload.get("ok") is False
                 or payload.get("success") is False or payload.get("status") == "error"
                 or payload.get("_research_reuse")):
-            return
+            return None
         receipt = capture_receipt(tool, arguments, result, call_id, True, symbols)
         if receipt is None:
-            return
-        receipt["fetched_at"] = self.now
-        self.items = merge_receipts([receipt], self.items)
+            return None
+        receipt["fetched_at"] = fetched_at
+        return receipt
+
+    def _save(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_suffix(".tmp")
@@ -167,8 +180,9 @@ class SessionEvidenceStore(SessionResearchCache):
             pass
 
     def recover_trace(self, trace_path):
-        """Migrate bounded same-session tool receipts from older app versions."""
-        if self.items or self.path is None:
+        """Backfill bounded originals even when a newer run saved only quotes."""
+        from src.agent.grounding.research_handoff import merge_receipts
+        if self.path is None:
             return
         try:
             with trace_path.open("rb") as stream:
@@ -180,7 +194,8 @@ class SessionEvidenceStore(SessionResearchCache):
                 lines = stream.read().decode("utf-8").splitlines()
         except (OSError, UnicodeError):
             return
-        calls, symbols = {}, set()
+        calls, symbols, recovered = {}, set(), []
+        known = {item.get("call_id") for item in self.items}
         for line in lines:
             try:
                 event = json.loads(line)
@@ -194,13 +209,20 @@ class SessionEvidenceStore(SessionResearchCache):
                 calls[event["call_id"]] = event
             elif event.get("type") == "tool_result" and event.get("status") == "ok":
                 call = calls.get(event.get("call_id"))
-                if call and isinstance(event.get("result"), str):
+                if call and event.get("call_id") not in known and isinstance(event.get("result"), str):
                     fetched = event.get("ts")
                     if isinstance(fetched, (int, float)) and 0 <= self.now - fetched <= 7 * 86400:
-                        now = self.now
-                        self.now = fetched
-                        self.record(call["tool"], call["args"], event["result"], call["call_id"], symbols)
-                        self.now = now
+                        receipt = self._original_receipt(call["tool"], call["args"], event["result"],
+                                                         call["call_id"], symbols, fetched)
+                        if receipt is not None:
+                            recovered.append(receipt)
+                            known.add(call["call_id"])
+        if recovered:
+            # Newest originals win the bounded packet; existing same-call
+            # receipts keep their dates and cannot be overwritten by replay.
+            combined = sorted([*self.items, *recovered], key=lambda item: item["fetched_at"], reverse=True)
+            self.items = merge_receipts([], combined)
+            self._save()
 
 
 def dated_evidence_context(ledger) -> str:

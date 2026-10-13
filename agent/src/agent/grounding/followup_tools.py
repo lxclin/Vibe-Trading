@@ -18,6 +18,20 @@ _TOOLS = frozenset({
 })
 
 
+def holding_context_subject(question):
+    """Recognize an explicit reference to previously supplied holding context."""
+    if len(question) > 4000:
+        return None
+    match = re.match(
+        r"^\s*请?(?:结合|沿用|根据|基于)(?:本会话|本次对话|此前|之前|前面)"
+        r"(?:中)?(?:我)?(?:已经|已)?(?:提供|给出)(?:的)?"
+        r"(?P<subject>[\u3400-\u9fffA-Za-z0-9.·-]{2,32}?)(?:持仓|仓位|成本)", question,
+    )
+    if not match or not re.search(r"(?:现在|当前).{0,12}(?:怎么做|怎么办|行动|操作)|当前倾向", question):
+        return None
+    return match.group("subject")
+
+
 def holding_followup_tools(question, ledger, definitions):
     """Return a scoped schema list only when original evidence was restored."""
     if (not is_holding_followup(question, ledger)
@@ -28,7 +42,10 @@ def holding_followup_tools(question, ledger, definitions):
 
 
 def is_holding_followup(question, ledger):
-    return bool(_HOLDING_FOLLOWUP.fullmatch(question) and ledger.inherited_symbols)
+    expanded = re.search(r"回测|投委会|团队|写(?:入|成)|保存.{0,12}文件|生成.{0,12}(?:文件|报告)|"
+                         r"下单|执行交易|比较|对比|换(?:成|个|一只)", question)
+    return bool(not expanded and ledger.inherited_symbols
+                and (_HOLDING_FOLLOWUP.fullmatch(question) or holding_context_subject(question)))
 
 
 def holding_constraints(history, symbols):

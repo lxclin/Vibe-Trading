@@ -236,7 +236,9 @@ class GroundingLedger(
         ):
             self._seed_followup_history(history or [])
         elif self._identity_required and not self._screening_request and not self._identities:
-            self._seed_named_followup_history(history or [])
+            self._seed_holding_context_history(history or [])
+            if not self._identities:
+                self._seed_named_followup_history(history or [])
         self.persist()
 
     @property

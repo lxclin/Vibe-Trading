@@ -32,7 +32,8 @@ def test_no_identity_or_no_original_receipts_keeps_full_registry():
 
 
 @pytest.mark.parametrize("expand", [False, True])
-def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkeypatch, expand):
+@pytest.mark.parametrize("long_context", [False, True])
+def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkeypatch, expand, long_context):
     from src.agent.grounding.query_budget import SessionEvidenceStore
     from src.agent.loop import AgentLoop
     from src.agent.tools import BaseTool, ToolRegistry
@@ -71,14 +72,19 @@ def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkey
     run = tmp_path / "run"
     run.mkdir()
     agent.memory.run_dir = str(run)
-    answer = agent.run("我应该怎么办", session_id="followup", history=[
-        {"role": "user", "content": "分析513330，已持有，一年期限"},
-        {"role": "assistant", "content": "已有报告", "grounding_identity": saved["identity"]}])
+    question = (Path(__file__).parent / "fixtures/research_20261012/holding_context_prompt.txt").read_text() if long_context else "我应该怎么办"
+    answer = agent.run(question, session_id="followup", history=[
+        {"role": "user", "content": "请分析恒生互联网，代码513330，已持有，一年期限"},
+        {"role": "assistant", "content": "已有报告", "grounding_identity": saved["identity"]},
+        {"role": "user", "content": "我应该怎么办"},
+        {"role": "assistant", "content": "有条件持有", "grounding_identity": {"status": "unresolved", "records": []}}])
     assert answer["status"] == "success" and write.calls == quote.calls == 0
     assert [d["function"]["name"] for d in llm.tools_history[0]] == ["get_a_share_valuation"]
     assert "[HOLDING FOLLOW-UP]" in llm.messages_history[0][0]["content"]
     assert "do not ask again" in llm.messages_history[0][0]["content"]
     trace = TraceWriter.read(tmp_path / "followup")
+    if long_context:
+        assert any(e["type"] == "session_evidence_restored" for e in trace)
     scope = next(e for e in trace if e["type"] == "research_tool_scope")
     assert scope["offered_schema_chars"] < scope["full_schema_chars"]
     costs = json.loads((run / "research_cost.json").read_text())

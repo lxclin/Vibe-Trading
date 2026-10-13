@@ -479,6 +479,73 @@ class IdentityScopeMixin:
             if not _REFERENTIAL_FOLLOWUP_RE.fullmatch(content):
                 return
 
+    def _seed_holding_context_history(self, history: Sequence[Mapping[str, Any]]) -> None:
+        """Bind a long holding follow-up to its nearest subject-setting turn.
+
+        An alias alone grants no authorization. The prior question must use
+        that exact name and its answer must carry a unique audited lock.
+        Short elliptical turns may intervene; a new subject stops the scan.
+        """
+        from src.agent.grounding.followup_tools import holding_context_subject
+
+        subject = holding_context_subject(self.user_message)
+        if not subject:
+            return
+        for index in range(len(history) - 1, -1, -1):
+            message = history[index]
+            if message.get("role") != "user":
+                continue
+            content = str(message.get("content") or "")
+            if _REFERENTIAL_FOLLOWUP_RE.fullmatch(content):
+                continue
+            # Do not search past an explicit intervening subject, even if an
+            # older question has the requested name.
+            if not re.search(r"(?:^|[^\u3400-\u9fffA-Za-z0-9]|分析|研究|查看|的)" + re.escape(subject)
+                             + r"(?=$|[\s\W]|持仓|仓位|成本|现在|当前|的)", content):
+                return
+            answer = next((item for item in history[index + 1:] if item.get("role") == "assistant"), None)
+            if not answer:
+                return
+            summary = answer.get("grounding_identity")
+            if not isinstance(summary, Mapping):
+                metadata = answer.get("metadata")
+                summary = metadata.get("grounding_identity") if isinstance(metadata, Mapping) else None
+            if not isinstance(summary, Mapping):
+                return
+            authorized = {_normalize_symbol(s) for s in summary.get("authorized_symbols", [])}
+            primary = {_normalize_symbol(s) for s in summary.get("primary_symbols", [])} & authorized
+            explicit = {_normalize_symbol(m.group(0)) for m in _CANONICAL_SYMBOL_RE.finditer(content)}
+            bare = set(_BARE_LISTED_CODE_RE.findall(content))
+            records = [raw for raw in summary.get("records", [])
+                       if isinstance(raw, Mapping) and raw.get("status") == "locked"
+                       and _normalize_symbol(raw.get("symbol")) in authorized]
+            matched = [raw for raw in records if (symbol := _normalize_symbol(raw.get("symbol"))) in explicit
+                       or symbol.split(".")[0] in bare]
+            if not matched and summary.get("status") == "locked":
+                scope = primary or (authorized if len(authorized) == 1 else set())
+                matched = [raw for raw in records if _normalize_symbol(raw.get("symbol")) in scope]
+            if len(matched) == 1:
+                symbol = _normalize_symbol(matched[0].get("symbol"))
+                for later in history[index + 1:]:
+                    if later is answer or later.get("role") != "assistant":
+                        continue
+                    audit = later.get("grounding_identity")
+                    if not isinstance(audit, Mapping):
+                        metadata = later.get("metadata")
+                        audit = metadata.get("grounding_identity") if isinstance(metadata, Mapping) else None
+                    if not isinstance(audit, Mapping):
+                        continue
+                    later_records = audit.get("records") or []
+                    if later_records and not any(isinstance(raw, Mapping) and raw.get("status") == "locked"
+                                                 and _normalize_symbol(raw.get("symbol")) == symbol
+                                                 for raw in later_records):
+                        return
+                    later_primary = {_normalize_symbol(s) for s in audit.get("primary_symbols", [])}
+                    if later_primary and later_primary != {symbol}:
+                        return
+                self._inherit_identity_record(symbol, matched[0])
+            return
+
     def _seed_named_followup_history(
         self,
         history: Sequence[Mapping[str, Any]],

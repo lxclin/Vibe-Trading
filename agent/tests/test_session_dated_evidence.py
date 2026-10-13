@@ -99,6 +99,33 @@ def test_trace_migration_recovers_original_quote_and_not_failed_financials(tmp_p
     assert all(i["fetched_at"] < store.now for i in store.items)
 
 
+@pytest.mark.parametrize("old_count", [1, 70])
+def test_trace_backfills_partial_store_preserving_newest_receipts_and_dates(tmp_path, saved, old_count):
+    call, result = _quote(saved)
+    now = result["ts"] + 7200
+    path, trace = tmp_path / "evidence.json", tmp_path / "trace.jsonl"
+    store = SessionEvidenceStore(path, now=now)
+    store.record(call["tool"], call["args"], result["result"], "latest", {"513330.SH"})
+    events = [{"type": "identity_state", "identity": {"authorized_symbols": ["513330.SH"]}}]
+    for index in range(old_count):
+        events.extend([
+            {"type": "tool_call", "call_id": f"old-{index}", "tool": call["tool"], "args": call["args"]},
+            {"type": "tool_result", "call_id": f"old-{index}", "status": "ok",
+             "result": result["result"], "ts": result["ts"] + index},
+        ])
+    trace.write_text("\n".join(json.dumps(e) for e in events))
+    store.recover_trace(trace)
+    assert len(store.items) == min(64, old_count + 1)
+    assert store.items[0]["call_id"] == "latest" and store.items[0]["fetched_at"] == now
+    assert store.items[1]["call_id"] == f"old-{old_count - 1}"
+    assert store.items[1]["fetched_at"] == result["ts"] + old_count - 1
+    originals = list(store.items)
+    store.recover_trace(trace)
+    assert store.items == originals
+    assert SessionEvidenceStore(path, now=now).items == originals
+    assert store.lookup(call["tool"], call["args"], {"513330.SH"}) is None
+
+
 def test_long_web_documents_cannot_push_quote_out_of_followup_inventory(tmp_path, saved):
     from dataclasses import replace
 
