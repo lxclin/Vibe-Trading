@@ -1363,6 +1363,8 @@ class AgentLoop:
             if holding_followup:
                 from src.agent.grounding.research_sources import research_source_context
                 messages[0]["content"] += research_source_context(self._grounding, self._session_evidence_store.items, run_dir)
+                from src.agent.grounding.fund_research import fund_holdings_context
+                messages[0]["content"] += fund_holdings_context(self._grounding, self._session_evidence_store.items)
                 messages[0]["content"] += holding_followup_guidance()
                 messages[0]["content"] += holding_research_guidance()
                 messages[0]["content"] += holding_argument_guidance()

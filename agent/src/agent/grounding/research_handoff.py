@@ -19,6 +19,20 @@ MAX_RECEIPT_CHARS = 180000
 MAX_PACKET_CHARS = 1500000
 
 
+def etf_receipt_subject(arguments, symbols):
+    """Match the holdings tool's symbol parameter to one existing identity."""
+    from src.agent.grounding.identity import _normalize_symbol
+    if arguments.get("mode", "holdings") != "holdings":
+        return None
+    raw = _normalize_symbol(arguments.get("symbol") or arguments.get("code"))
+    market = str(arguments.get("market") or "auto").upper()
+    matches = [s for s in symbols if _normalize_symbol(s) == raw
+               or ("." not in raw and raw == s.split(".")[0])]
+    matches = [s for s in matches if not (market == "CN" and not s.endswith((".SH", ".SZ")))
+               and not (market == "US" and s.endswith((".SH", ".SZ", ".HK")))]
+    return matches[0] if len(matches) == 1 else None
+
+
 def capture_receipt(
     tool: str, arguments: Mapping[str, Any], result: str, call_id: str,
     success: bool, symbols: Iterable[str],
@@ -34,7 +48,12 @@ def capture_receipt(
     scope = sorted(set(symbols))
     code = str(arguments.get("code") or "").upper()
     query = str(arguments.get("query") or "").upper()
-    if tool in {"get_a_share_valuation", "get_financial_statements", "etf_holdings"} and code in scope:
+    if tool == "etf_holdings":
+        subject = etf_receipt_subject(arguments, scope)
+        if not subject:
+            return None
+        scope = [subject]
+    elif tool in {"get_a_share_valuation", "get_financial_statements"} and code in scope:
         scope = [code]
     elif tool == "search_symbol" and query in scope:
         scope = [query]
@@ -78,13 +97,19 @@ def scoped_receipts(items: Any, authorized_symbols: set[str]) -> list[dict[str, 
     for item in merge_receipts([], items[:MAX_RECEIPTS]):
         scope = item.get("scope_symbols")
         args, result = item.get("arguments"), item.get("result")
+        if item["tool"] == "etf_holdings" and isinstance(args, dict) and isinstance(scope, list):
+            subject = etf_receipt_subject(args, [s for s in scope if isinstance(s, str) and s in authorized_symbols])
+            if not subject:
+                continue
+            item = {**item, "scope_symbols": [subject]}
+            scope = item["scope_symbols"]
         if (not isinstance(scope, list) or not scope or not all(isinstance(s, str) for s in scope)
                 or not set(scope).issubset(authorized_symbols)
                 or not isinstance(args, dict) or not isinstance(result, str)
                 or len(result) > MAX_RECEIPT_CHARS or not isinstance(item.get("success"), bool)):
             continue
         tool = item["tool"]
-        if tool in {"get_a_share_valuation", "get_financial_statements", "etf_holdings"}:
+        if tool in {"get_a_share_valuation", "get_financial_statements"}:
             if str(args.get("code") or "").upper() not in authorized_symbols:
                 continue
         elif tool == "search_symbol":
@@ -103,6 +128,12 @@ def scoped_receipts(items: Any, authorized_symbols: set[str]) -> list[dict[str, 
             continue
         if not isinstance(payload, dict):
             continue
+        if tool == "etf_holdings":
+            from src.agent.grounding.identity import _normalize_symbol
+            data = payload.get("data")
+            declared = data.get("symbol") if isinstance(data, dict) else None
+            if declared and _normalize_symbol(declared) not in {subject, subject.split(".")[0]}:
+                continue
         if tool == "read_url":
             from src.tools.web_reader_status import target_page_failure
             if target_page_failure(str(payload.get("title") or ""), str(payload.get("content") or "")):

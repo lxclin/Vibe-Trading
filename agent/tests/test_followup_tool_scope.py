@@ -48,6 +48,9 @@ def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkey
     monkeypatch.setattr("time.time", lambda: result["ts"] + 7200)
     store = SessionEvidenceStore(tmp_path / "followup/research_evidence.json", now=result["ts"])
     store.record(call["tool"], call["args"], result["result"], call["call_id"], {"513330.SH"})
+    holdings = json.loads((Path(__file__).parent / "fixtures/research_20261012/fund_holdings.json").read_text())
+    store.record("etf_holdings", {"mode": "holdings", "symbol": "513330.SH", "market": "CN"},
+                 json.dumps(holdings), "historical-holdings", {"513330.SH"})
 
     class Tool(BaseTool):
         description = "x" * 2000
@@ -83,6 +86,8 @@ def test_loop_scopes_schemas_and_never_executes_unoffered_batch(tmp_path, monkey
     assert "[HOLDING FOLLOW-UP]" in llm.messages_history[0][0]["content"]
     assert "do not ask again" in llm.messages_history[0][0]["content"]
     assert "[ORIGINAL RESEARCH SOURCES]" in llm.messages_history[0][0]["content"]
+    assert "[DATED FUND RESEARCH COVERAGE]" in llm.messages_history[0][0]["content"]
+    assert "unchecked; holdings disclosure is not financial analysis" in llm.messages_history[0][0]["content"]
     if long_context:
         assert "[PRE-ANSWER RESEARCH PLAN]" in llm.messages_history[0][0]["content"]
     trace = TraceWriter.read(tmp_path / "followup")

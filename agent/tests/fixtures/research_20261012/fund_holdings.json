@@ -1,0 +1,101 @@
+{
+  "ok": true,
+  "mode": "holdings",
+  "market": "CN",
+  "source": "eastmoney_fund_archives",
+  "as_of": "2026-06-30",
+  "coverage": "full_portfolio",
+  "notes": "ETF holdings are disclosed with a lag. 'as_of' is the report period the holdings belong to, NOT today's portfolio. These are ALL the fund's disclosed stock holdings for this period: Chinese funds publish the complete portfolio in the interim and annual reports, and pct_of_net_assets_disclosed shows how much of net assets they add up to. NOTE: top_n=5 cut 25 of this period's 30 disclosed rows before paging, so paging to the end yields the largest top_n holdings rather than the whole period. Raise top_n (max 6000) to page through all of it.",
+  "missing_fields": [
+    "expense_ratio",
+    "full_portfolio",
+    "net_assets"
+  ],
+  "paging": {
+    "total": 5,
+    "offset": 0,
+    "returned": 5,
+    "next_offset": null,
+    "complete": true
+  },
+  "data": {
+    "symbol": "513330.SH",
+    "fund": {
+      "code": "513330",
+      "name": "恒生互联网ETF华夏"
+    },
+    "report_label": "2026年2季度股票投资明细",
+    "disclosure": {
+      "requested": "latest",
+      "report": "华夏恒生互联网科技业交易型开放式指数证券投资基金(QDII)2026年中期报告",
+      "report_published": "2026-08-31",
+      "report_confirmed": true,
+      "disclosure_lag_days": 62
+    },
+    "holdings_in_period": 30,
+    "cross_referenced_in_period": 0,
+    "unparseable_rows": 0,
+    "holdings_withheld_by_top_n": 25,
+    "pct_of_net_assets_disclosed": 96.91,
+    "pct_of_net_assets_cross_referenced": 0,
+    "full_portfolio_available": null,
+    "available_periods": [
+      {
+        "as_of": "2026-06-30",
+        "report_label": "2026年2季度股票投资明细",
+        "coverage": "full_portfolio",
+        "holdings_in_period": 30,
+        "pct_of_net_assets_disclosed": 96.91
+      },
+      {
+        "as_of": "2026-03-31",
+        "report_label": "2026年1季度股票投资明细",
+        "coverage": "top_n_disclosed",
+        "holdings_in_period": 10,
+        "pct_of_net_assets_disclosed": 84.38
+      }
+    ],
+    "holdings": [
+      {
+        "symbol": "00700",
+        "disclosure_source": "fund_report",
+        "name": "腾讯控股",
+        "pct_of_net_assets": 15.89,
+        "shares": 10849900.0,
+        "market_value_cny": 4050297900.0
+      },
+      {
+        "symbol": "09988",
+        "disclosure_source": "fund_report",
+        "name": "阿里巴巴-W",
+        "pct_of_net_assets": 12.63,
+        "shares": 39919900.0,
+        "market_value_cny": 3219335000.0
+      },
+      {
+        "symbol": "09999",
+        "disclosure_source": "fund_report",
+        "name": "网易",
+        "pct_of_net_assets": 12.16,
+        "shares": 17625800.0,
+        "market_value_cny": 3098519100.0
+      },
+      {
+        "symbol": "03690",
+        "disclosure_source": "fund_report",
+        "name": "美团-W",
+        "pct_of_net_assets": 9.51,
+        "shares": 40744900.0,
+        "market_value_cny": 2424144100.0
+      },
+      {
+        "symbol": "01810",
+        "disclosure_source": "fund_report",
+        "name": "小米集团-W",
+        "pct_of_net_assets": 8.67,
+        "shares": 117564400.0,
+        "market_value_cny": 2209672500.0
+      }
+    ]
+  }
+}
