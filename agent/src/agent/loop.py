@@ -1280,6 +1280,7 @@ class AgentLoop:
             holding_followup_tools, holding_research_gaps, holding_research_guidance, is_holding_followup,
         )
         holding_followup = is_holding_followup(user_message, self._grounding)
+        from src.agent.grounding.holding_arguments import holding_argument_guidance, holding_argument_review
         known_holding_constraints = holding_constraints(history, self._grounding.inherited_symbols) if holding_followup else {}
         complete_tool_defs = definitions() if callable(definitions) else []
         followup_tool_defs = holding_followup_tools(user_message, self._grounding, complete_tool_defs)
@@ -1360,6 +1361,7 @@ class AgentLoop:
             if holding_followup:
                 messages[0]["content"] += holding_followup_guidance()
                 messages[0]["content"] += holding_research_guidance()
+                messages[0]["content"] += holding_argument_guidance()
                 if known_holding_constraints:
                     messages[0]["content"] += "\nUser-stated constraints: " + json.dumps(known_holding_constraints, ensure_ascii=False)
         if self._grounding._decision_required:
@@ -2035,6 +2037,7 @@ class AgentLoop:
                     if (holding_followup and not research_delivery_reviewed and not forced_grounding_release
                             and iteration + 1 < self.max_iterations):
                         delivery_requests.extend(holding_delivery_review(final_content, known_holding_constraints))
+                        delivery_requests.extend(holding_argument_review(user_message, final_content, self._grounding._evidence))
                     if self._grounding is not None:
                         validation = (
                             self._grounding.revalidate(final_content)

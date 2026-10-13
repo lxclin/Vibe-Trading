@@ -26,7 +26,7 @@ def test_conditional_risk_and_figures_are_not_missing_evidence_admissions():
     assert not holding_research_gaps(QUESTION, "```figures\n" + GAP + "\n```")
 
 
-@pytest.mark.parametrize("mode", ["research", "unavailable", "no_fetch", "no_tools", "numeric", "bad_research"])
+@pytest.mark.parametrize("mode", ["research", "unavailable", "no_fetch", "no_tools", "numeric", "bad_research", "argument", "argument_numeric"])
 def test_evidence_pass_can_use_tools_but_is_not_an_infinite_or_numeric_recovery(tmp_path, monkeypatch, mode):
     from src.agent.grounding.query_budget import SessionEvidenceStore
     from src.agent.loop import AgentLoop
@@ -56,7 +56,9 @@ def test_evidence_pass_can_use_tools_but_is_not_an_infinite_or_numeric_recovery(
     if mode != "no_tools":
         registry.register(tool)
     draft = COMPLETE + GAP + "513330.SH（腾讯，CNY）历史快照价格0.338元，不是当前实时价格。"
-    first = draft + ("目标价0.999元。" if mode == "numeric" else "")
+    first = draft + ("目标价0.999元。" if mode in {"numeric", "argument_numeric"} else "")
+    if mode in {"argument", "argument_numeric"}:
+        first += "目前盈利正在改善，因此继续持有。"
     responses = [_Response(content=first)]
     if mode == "research":
         responses.append(_Response(tool_calls=[_tool_call("primary-source", "web_search", query="513330 指数估值 官方报告")]))
@@ -68,7 +70,7 @@ def test_evidence_pass_can_use_tools_but_is_not_an_infinite_or_numeric_recovery(
     run = tmp_path / "run"
     run.mkdir()
     agent.memory.run_dir = str(run)
-    question = QUESTION + ("不要补查" if mode == "no_fetch" else "")
+    question = QUESTION + ("不要补查" if mode in {"no_fetch", "argument", "argument_numeric"} else "")
     answer = agent.run(question, session_id="followup", history=[
         {"role": "user", "content": "请分析恒生互联网，代码513330，已持有一年。"},
         {"role": "assistant", "content": "报告", "grounding_identity": saved["identity"]},
@@ -80,7 +82,7 @@ def test_evidence_pass_can_use_tools_but_is_not_an_infinite_or_numeric_recovery(
     should_review = mode in {"research", "unavailable", "bad_research"}
     assert len(review) == int(should_review)
     assert tool.calls == int(mode == "research")
-    assert llm.calls == (3 if mode in {"research", "bad_research"} else 2 if should_review or mode == "numeric" else 1)
+    assert llm.calls == (3 if mode in {"research", "bad_research"} else 2 if should_review or mode in {"numeric", "argument", "argument_numeric"} else 1)
     if should_review:
         assert any(d["function"]["name"] == "web_search" for d in llm.tools_history[1])
         assert "opposing evidence" in llm.messages_history[1][-1]["content"]
@@ -92,3 +94,11 @@ def test_evidence_pass_can_use_tools_but_is_not_an_infinite_or_numeric_recovery(
     if mode == "bad_research":
         assert llm.tools_history[2] is None
         assert any(e["type"] == "answer_rejected" for e in trace)
+    if mode in {"argument", "argument_numeric"}:
+        edits = [e for e in trace if e["type"] == "research_delivery_review"]
+        assert len(edits) == 1
+        assert any("Trace this asserted" in r for r in edits[0]["requests"])
+        assert llm.tools_history[1] is None
+        assert "目前盈利正在改善" not in answer["content"]
+        if mode == "argument_numeric":
+            assert edits[0]["combined_with_grounding"] is True
