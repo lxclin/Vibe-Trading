@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from src.tools.public_financial_snapshot import public_financial_snapshot
+from src.tools.public_index_snapshot import public_index_snapshot
 
 from src.agent.grounding.identity import (
     _CANONICAL_SYMBOL_RE,
@@ -1143,7 +1144,15 @@ class _EvidenceMixin:
                     ))
             # The tool's metadata has been parsed above with its own identity;
             # do not flatten it again into the request's symbol or no symbol.
-            payload = {key: value for key, value in payload.items() if key != "web_financial"}
+            index_snapshot = public_index_snapshot(str(payload.get("url") or ""), str(payload.get("content") or ""))
+            if index_snapshot:
+                for field in ("pe_ratio", "dividend_yield_pct", "annual_volatility_pct"):
+                    self._evidence.append(EvidenceRecord(
+                        call_id=call_id, tool=tool_name, symbol=None, source=index_snapshot["source"],
+                        timestamp=index_snapshot["as_of"], field="index_financial." + field,
+                        value=index_snapshot[field], status="observed",
+                    ))
+            payload = {key: value for key, value in payload.items() if key not in {"web_financial", "index_financial"}}
         symbols = self._extract_symbol_arguments(arguments)
         symbol = symbols[0] if len(symbols) == 1 else None
         if symbol:

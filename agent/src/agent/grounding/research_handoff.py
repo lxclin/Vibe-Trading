@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping
 
 RESEARCH_TOOLS = frozenset({
     "search_symbol", "get_a_share_valuation", "get_financial_statements",
-    "get_market_data", "financial_rigor", "web_search", "read_url", "etf_holdings",
+    "get_market_data", "financial_rigor", "web_search", "read_url", "etf_holdings", "hsi_index_resources",
 })
 MAX_RECEIPTS = 64
 MAX_RECEIPT_CHARS = 180000

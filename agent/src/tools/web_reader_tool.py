@@ -13,6 +13,7 @@ from src.agent.progress import emit_progress
 from src.agent.tools import BaseTool
 from src.security.scanner import with_security_warnings
 from src.tools.public_financial_snapshot import public_financial_snapshot
+from src.tools.public_index_snapshot import public_index_snapshot
 from src.tools.web_reader_status import target_page_failure
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,9 @@ def read_url(url: str, no_cache: bool = False, offset: int = 0, max_chars: int =
         snapshot = public_financial_snapshot(target_url, text)
         if snapshot:
             result["web_financial"] = snapshot
+        index_snapshot = public_index_snapshot(target_url, text)
+        if index_snapshot:
+            result["index_financial"] = index_snapshot
         result = with_security_warnings(result, fields=("content",))
         return json.dumps(result, ensure_ascii=False)
 
@@ -175,6 +179,9 @@ class WebReaderTool(BaseTool):
         "structured fields. Cite these as observed with call_id::web_financial.last_price or "
         "call_id::web_financial.unit_nav. Daily unit_nav is not intraday IOPV. "
         "A successful page read does not mean the full filing was read."
+        " Official English Hang Seng factsheets in a recognized layout also return index_financial "
+        "with index identity and statistics date; cite call_id::index_financial.pe_ratio or "
+        "dividend_yield_pct. These are dated index fundamentals, not ETF valuation or historical percentile."
     )
     parameters = {
         "type": "object",

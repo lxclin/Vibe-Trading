@@ -918,7 +918,14 @@ class _PolicyMixin:
                     self._check_cited(figure, declaration, symbol, declared_observed, line)
                 )
                 continue
-            checked_price = True
+            # A dimensionless index multiple/percentage is not a fund quote.
+            # Its exact source/value is still checked below; avoid requiring
+            # unrelated inherited quote provenance merely because it is numeric.
+            index_stat = role == "observed" and any(declaration.ref.endswith("::index_financial." + field)
+                for field in ("pe_ratio", "dividend_yield_pct", "annual_volatility_pct"))
+            index_units = figure.percent or content[figure.end:figure.end + 4].lstrip().startswith("倍")
+            if not (index_stat and index_units and not figure.currency and not figure.column):
+                checked_price = True
             if role == "derived":
                 issues.extend(
                     self._check_derived(figure, declaration, symbol, records)

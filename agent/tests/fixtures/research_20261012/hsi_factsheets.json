@@ -1,0 +1,24 @@
+{
+  "code": "0",
+  "message": "success",
+  "data": [
+    {
+      "seriesCode": "hsiii",
+      "seriesName": "Hang Seng Internet & Information Technology Index",
+      "seriesOrder": 41,
+      "dailyReport": "hsiii",
+      "fileEng": "/public-website/webapp/factsheets/en-hk/hsiii.pdf",
+      "fileChi": "/public-website/webapp/factsheets/zh-hk/hsiii.pdf",
+      "fileSchi": "/public-website/webapp/factsheets/zh-cn/hsiii.pdf"
+    },
+    {
+      "seriesCode": "hssciii",
+      "seriesName": "Hang Seng SCHK Internet & Information Technology Index",
+      "seriesOrder": 253,
+      "dailyReport": "hssciii",
+      "fileEng": "/public-website/webapp/factsheets/en-hk/hssciii.pdf",
+      "fileChi": "/public-website/webapp/factsheets/zh-hk/hssciii.pdf",
+      "fileSchi": "/public-website/webapp/factsheets/zh-cn/hssciii.pdf"
+    }
+  ]
+}

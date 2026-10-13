@@ -174,3 +174,13 @@ def test_progress_forgets_the_notes_of_an_earlier_stall() -> None:
     message = progress.recovery_message()
     assert "c failed (boom) x1" in message
     assert "timeout" not in message
+
+
+def test_empty_index_resource_search_does_not_count_as_new_evidence():
+    progress = ToolProgress()
+    for index in range(NO_PROGRESS_LIMIT):
+        progress.record("hsi_index_resources", ("hsi_index_resources", str(index)),
+                        json.dumps({"status": "ok", "query": str(index), "candidates": []}),
+                        success=True, is_readonly=True)
+        stopped = progress.finish_iteration()
+    assert stopped and progress.stalled_iterations == NO_PROGRESS_LIMIT

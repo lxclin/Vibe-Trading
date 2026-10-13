@@ -101,7 +101,8 @@ class ToolProgress:
             # A changed query echoed in an empty search envelope is activity,
             # not new evidence. Keep alternatives available, but do not let
             # endless keyword variations reset the bounded analysis recovery.
-            if name == "web_search" and isinstance(payload, dict) and payload.get("results") == []:
+            if isinstance(payload, dict) and ((name == "web_search" and payload.get("results") == [])
+                                             or (name == "hsi_index_resources" and payload.get("candidates") == [])):
                 self.note("empty", name)
                 return
             result = json.dumps(payload, sort_keys=True, ensure_ascii=False)

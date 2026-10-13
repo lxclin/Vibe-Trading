@@ -13,7 +13,7 @@ _HOLDING_FOLLOWUP = re.compile(
 )
 _TOOLS = frozenset({
     "search_symbol", "get_a_share_valuation", "get_market_data", "get_financial_statements",
-    "etf_holdings", "financial_rigor", "web_search", "read_url", "read_file", "read_document",
+    "etf_holdings", "hsi_index_resources", "financial_rigor", "web_search", "read_url", "read_file", "read_document",
     "read_run_artifact", "load_skill", "skill_file", "compact",
 })
 
@@ -124,6 +124,9 @@ def holding_research_preflight():
         "index and dated holdings, then choose material constituents rather than treating their findings "
         "as full fund coverage. Discover source URLs from actual search results or published page links; "
         "do not guess index detail paths. Batch independent reads and follow dependent links in order. "
+        "For a verified Hang Seng index, hsi_index_resources can discover its actual official factsheet "
+        "through the published directory when JavaScript pages hide links. This is not a fund benchmark "
+        "resolver; read the returned file and preserve its statistics date and price/return variant. "
         "If evidence is sufficient, retrieval is unavailable, or a gap cannot affect the immediate action, "
         "explain that boundary and answer without ceremonial fetching. This is a planning aid, not a "
         "mandatory fixed query count, proof of completeness or reason to invent data."

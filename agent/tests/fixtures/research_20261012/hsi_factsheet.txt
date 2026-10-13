@@ -1,0 +1,92 @@
+Title: hsiii.pdf
+
+URL Source: https://www.hsi.com.hk/api/wsit-hsi-ddoc-ea-public-website-proxy/v1/content/gcs/download?resource=/public-website/webapp/factsheets/en-hk/hsiii.pdf
+
+Number of Pages: 2
+
+Markdown Content:
+# Hang Seng Internet & Information Technology Index 
+
+September 2026 
+
+Hang Seng Internet & Information Technology Index ("HSIII") aims to reflect the overall performance of stocks listed in Hong Kong that are related to internet and information technology businesses. 
+
+# FEATURES 
+
+The HSIII includes Hang Seng Composite Index constituents that are classified under Software Services sector 
+
+> ■
+
+Constituents are freefloat-adjusted for investability representation 
+
+> ■
+
+Capping is applied to avoid single stock domination 
+
+> ■
+
+# INFORMATION 
+
+Launch Date 17 Aug 2015 
+
+Backdated To 5 Mar 2010 
+
+Base Date 5 Mar 2010 
+
+Base Index 3,000 
+
+Review Half-yearly 
+
+Dissemination Every 2 sec 
+
+Currency HKD 
+
+Total Return Index Available 
+
+No. of Constituents 30 
+
+# VENDOR CODES 
+
+Bloomberg HSIII 
+
+Refinitiv .HSIII 
+
+# CONTACT US 
+
+Email info@hsi.com.hk 
+
+Data has been rebased at 100.00. All information for an index prior to its launch date is back-tested, back-tested performance reflects hypothetical historical performance. 
+
+INDEX PERFORMANCE 
+
+% Change Index Index Level 1 - Mth 3 - Mth 6 - Mth 1 - Yr 3 - Yr 5 - Yr YTD 
+
+HSIII 2,038.77 -8.04 -1.27 -15.13 -40.98 -9.18 -47.00 -30.57 
+
+HSCI 3,630.08 -3.75 +5.88 -2.45 -12.70 +35.35 -4.87 -7.10 
+
+INDEX FUNDAMENTALS 
+
+Index Dividend Yield (%) PE Ratio (Times) Annual Volatility*(%) 
+
+HSIII 1.14 30.08 29.90 
+
+*Annual Volatility was calculated based on daily return for the past 12-month period. 
+
+All data as at 30 Sep 2026 
+
+Disclaimer 
+
+The information contained herein is for reference only. Hang Seng Indexes Company Limited (“Hang Seng Indexes”) ensures the accuracy and reliability of the information contained herein to the best of its endeavours. However, Hang Seng Indexes makes no warranty or representation as to the accuracy, completeness or reliability of any of the information contained herein and accepts no liability (whether in tort or contract or otherwise) whatsoever to any person for any damage or loss of any nature arising from or as a result of reliance on any of the contents of this document, or any errors or omissions in its contents and such contents may change from time to time without notice. The information contained herein does not constitute any express or implied advice or recommendation by Hang Seng Indexes for any investments. Investment involves risks. Prospective investors should not make any investment decision based solely on the information provided herein and should seek independent investment advice to ensure that any of their decisions is made with regard to their own investment objectives, financial circumstances and other particular needs. Prospective investors should also note that value of securities and investments can go down as well as up and past performance is not necessarily indicative of future performance. Hang Seng Indexes is a subsidiary of Hang Seng Bank Limited which is part of the group of companies under HSBC Holdings plc (“HSBC Group”). Potential conflicts of interest may arise between Hang Seng Indexes and other HSBC Group member(s). To manage actual or potential conflicts of interest, Hang Seng Indexes has in place policies and/or procedures to identify and manage conflicts of interest that relate to the creation, submission and administration of its indexes and/or that may arise between Hang Seng Indexes and other HSBC Group member(s). To reduce and avoid such conflicts of interest, each of Hang Seng Indexes and other HSBC Group members has its independent management structure and each entity acts independently and on an arm’s length basis. 
+
+© Hang Seng Indexes Company Limited 2026. All rights reserved. 
+
+www.hsi.com.hk 
+
+A wholly-owned subsidiary of Hang Seng Bank CONSTITUENTS 
+
+Stock Code ISIN CODE Company Name Industry Classification Share Type Weighting (%) 
+
+0700 KYG875721634 TENCENT Information Technology Other HK-listed Mainland Co. 15.64 9988 KYG017191142 BABA - W Consumer Discretionary Other HK-listed Mainland Co. 15.47 9999 KYG6427A1022 NTES Information Technology Other HK-listed Mainland Co. 10.89 3690 KYG596691041 MEITUAN - W Consumer Discretionary Other HK-listed Mainland Co. 9.99 1810 KYG9830T1067 XIAOMI - W Information Technology Other HK-listed Mainland Co. 9.78 9618 KYG8208B1014 JD - SW Consumer Discretionary Other HK-listed Mainland Co. 7.79 9888 KYG070341048 BIDU - W Consumer Discretionary Other HK-listed Mainland Co. 6.48 1024 KYG532631028 KUAISHOU - W Consumer Discretionary Other HK-listed Mainland Co. 4.52 9660 KYG4602S1057 HORIZONROBOT - W Information Technology Other HK-listed Mainland Co. 2.35 2382 KYG8586D1097 SUNNY OPTICAL Information Technology Other HK-listed Mainland Co. 2.14 0020 KYG8062L1041 SENSETIME - W Information Technology Other HK-listed Mainland Co. 2.13 0100 KYG6181S1093 MINIMAX - W Information Technology Other HK-listed Mainland Co. 2.11 9626 KYG1098A1013 BILIBILI - W Consumer Discretionary Other HK-listed Mainland Co. 1.84 3888 KYG5264Y1089 KINGSOFT Information Technology Other HK-listed Mainland Co. 1.16 0268 KYG525681477 KINGDEE INT'L Information Technology Other HK-listed Mainland Co. 1.07 0285 HK0285041858 BYD ELECTRONIC Information Technology Other HK-listed Mainland Co. 0.87 2026 KYG7171B1068 PONY - W Information Technology Other HK-listed Mainland Co. 0.80 2525 KYG4417G1148 HESAI - W Information Technology Other HK-listed Mainland Co. 0.80 1357 KYG5966D1051 MEITU Consumer Discretionary Other HK-listed Mainland Co. 0.67 3896 KYG5264S1012 KINGSOFT CLOUD Information Technology Other HK-listed Mainland Co. 0.64 1797 KYG5313A1013 EAST BUY Consumer Discretionary Other HK-listed Mainland Co. 0.60 2400 KYG9830N1097 XD INC Information Technology Other HK-listed Mainland Co. 0.56 2513 CNE100007DH9 Z.AI Information Technology H Share 0.55 9698 KYG3902L1095 GDS - SW Information Technology Other HK-listed Mainland Co. 0.50 2498 KYG7611S1075 ROBOSENSE Information Technology Other HK-listed Mainland Co. 0.30 9678 CNE100006Z46 UNISOUND Information Technology H Share 0.12 3317 CNE100007CW0 XUNCE Information Technology H Share 0.11 1384 CNE1000076K9 DEEPEXI TECH Information Technology H Share 0.06 0068 KYG5860M1024 MANYCORE TECH Information Technology Other HK-listed Mainland Co. 0.05 2718 KYG6144L1005 MININGLAMP - W Information Technology Other HK-listed Mainland Co. 0.01 
+
+Total 100.00

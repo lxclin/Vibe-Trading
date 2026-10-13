@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable
 
-REUSABLE_TOOLS = frozenset({"get_financial_statements", "web_search", "read_url", "financial_rigor"})
+REUSABLE_TOOLS = frozenset({"get_financial_statements", "web_search", "read_url", "financial_rigor", "hsi_index_resources"})
 BUDGETED_TOOLS = REUSABLE_TOOLS | {"search_symbol", "get_a_share_valuation", "get_market_data"}
 MAX_FAILURES = 2
 
